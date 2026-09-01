@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ZoeVIP</string>
+    <string name="home_title">ZoeVIP</string>
+    <string name="afusekt_settings_title">Afusekt 设置</string>
+    <string name="xposed_description">ZoeVIP：多应用 VIP/PRO 本地解锁模块（libxposed）。在 LSPosed 中启用并勾选作用域后使用。</string>
+</resources>

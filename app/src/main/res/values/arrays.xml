@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="xposed_scope">
+        <item>com.attempt.afusekt</item>
+        <item>com.feifeiduck.capyplayer</item>
+        <item>com.oumi.utility.media.hub</item>
+        <item>com.omarea.vtools</item>
+        <item>com.ximalaya.ting.android</item>
+        <item>com.mt.mtxx.mtxx</item>
+        <item>com.xs.fm</item>
+        <item>com.dragon.read</item>
+        <item>com.phoenix.read</item>
+        <item>com.kylin.read</item>
+        <item>com.mountains.hills</item>
+    </string-array>
+</resources>

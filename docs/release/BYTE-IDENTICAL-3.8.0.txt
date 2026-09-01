@@ -1,0 +1,17 @@
+﻿ZoeVIP 3.8.0 字节级一比一校验
+================================
+权威发行包: dist/latest/ZoeVIP-3.8.0.apk
+交接说明: PROGRESS.md
+
+SHA256: DD0A0017160F0FEB765B22C8C38E9379E5ACE215EDA8FDC36D055FB71E7FC73C
+大小: 786356 bytes
+包名: com.zoevip.lsp
+versionName: 3.8.0
+versionCode: 99
+
+原始来源: 微信 base.apk(1).1（2026-08）
+
+保证:
+- 本文件对应 APK 与微信正式 3.8.0 字节完全一致
+- 工程源码进度已对齐 3.8.0 功能集（含 com.omarea.vtools）
+- 本地 gradle 重编不保证字节相同；勿覆盖 dist/latest

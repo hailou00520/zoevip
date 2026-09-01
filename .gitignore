@@ -1,0 +1,23 @@
+# Build / Gradle
+.gradle/
+**/build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Temp / extract
+apk_extract/
+temp.zip
+build_err.txt
+
+# Release APK dumps at repo root (keep artifacts/restore-point/)
+/ZoeVIP-*.apk
+/ZoeVIP-*.idsig
+
+# Keystore stays local (not in snapshot)
+zoevip.keystore
+
+tools/
+!tools/hills/device_libapp.so

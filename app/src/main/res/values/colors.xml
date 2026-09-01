@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light theme (Material 3 inspired) -->
+    <color name="zoe_bg">#F7F9FB</color>
+    <color name="zoe_surface">#FFFFFF</color>
+    <color name="zoe_surface_variant">#EFF2F5</color>
+    <color name="zoe_accent">#0B7A52</color>
+    <color name="zoe_on_accent">#FFFFFF</color>
+    <color name="zoe_accent_container">#A9F2D0</color>
+    <color name="zoe_on_accent_container">#002114</color>
+    <color name="zoe_text">#191C1A</color>
+    <color name="zoe_muted">#5F6B64</color>
+    <color name="zoe_outline">#8B9490</color>
+    <color name="zoe_ripple">#1A0B7A52</color>
+    <color name="ic_launcher_background">#0B7A52</color>
+    <color name="ic_launcher_foreground">#FFFFFF</color>
+</resources>

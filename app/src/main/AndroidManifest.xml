@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <queries>
+        <package android:name="org.lsposed.manager" />
+        <package android:name="io.github.lsposed.manager" />
+        <package android:name="com.attempt.afusekt" />
+        <package android:name="com.feifeiduck.capyplayer" />
+        <package android:name="com.oumi.utility.media.hub" />
+        <package android:name="com.omarea.vtools" />
+        <package android:name="com.ximalaya.ting.android" />
+        <package android:name="com.dragon.read" />
+        <package android:name="com.phoenix.read" />
+        <package android:name="com.kylin.read" />
+    </queries>
+
+    <application
+        android:name=".ModuleApp"
+        android:allowBackup="false"
+        android:description="@string/xposed_description"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ZoeVIP">
+
+        <provider
+            android:name=".sync.WebDavConfigProvider"
+            android:authorities="com.zoevip.lsp.webdav"
+            android:exported="true"
+            android:enabled="true" />
+
+        <receiver
+            android:name=".sync.WebDavConfigRequestReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="com.zoevip.lsp.WEBDAV_CONFIG_REQUEST" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/home_title">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".AfusektSettingsActivity"
+            android:exported="false"
+            android:label="@string/afusekt_settings_title"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- Classic Xposed metadata — required for NPatch / LSPatch manager loading -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="@string/xposed_description" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="93" />
+        <meta-data
+            android:name="xposedsharedprefs"
+            android:value="true" />
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+    </application>
+
+</manifest>

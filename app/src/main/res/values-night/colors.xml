@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark theme (brand green on deep navy) -->
+    <color name="zoe_bg">#0F1419</color>
+    <color name="zoe_surface">#1A2332</color>
+    <color name="zoe_surface_variant">#232D3B</color>
+    <color name="zoe_accent">#3DDC97</color>
+    <color name="zoe_on_accent">#003829</color>
+    <color name="zoe_accent_container">#00523B</color>
+    <color name="zoe_on_accent_container">#6FF6BC</color>
+    <color name="zoe_text">#F2F5F8</color>
+    <color name="zoe_muted">#8B9BB0</color>
+    <color name="zoe_outline">#3E4A58</color>
+    <color name="zoe_ripple">#263DDC97</color>
+    <color name="ic_launcher_background">#0F1419</color>
+    <color name="ic_launcher_foreground">#3DDC97</color>
+</resources>
