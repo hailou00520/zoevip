@@ -10,6 +10,7 @@ import com.afusekt.lsp.libxposed.LibFanqieNovelHooks;
 import com.afusekt.lsp.libxposed.LegacyHookBridge;
 import com.afusekt.lsp.libxposed.LibHideCheck;
 import com.afusekt.lsp.libxposed.LibHillsHooks;
+import com.afusekt.lsp.libxposed.LibLvchaHooks;
 import com.afusekt.lsp.libxposed.LibMtxxHooks;
 import com.afusekt.lsp.libxposed.LibProcMapsFilter;
 import com.afusekt.lsp.libxposed.LibXimalayaHooks;
@@ -73,6 +74,11 @@ public final class ZoeModule extends XposedModule {
             LibHillsHooks.onPackageLoaded(this, param.getDefaultClassLoader());
             return;
         }
+        if (ZoeIds.isLvchaPackage(pkg)) {
+            log(4, ZoeIds.TAG, "onPackageLoaded: " + pkg);
+            LibLvchaHooks.onPackageLoaded(this, param.getDefaultClassLoader());
+            return;
+        }
         if (ZoeIds.AFUSEKT_PACKAGE.equals(pkg)) {
             log(4, ZoeIds.TAG, "onPackageLoaded: " + pkg);
             LibAfusektShield.installEarly(this, param);
@@ -125,6 +131,11 @@ public final class ZoeModule extends XposedModule {
         if (ZoeIds.HILLS_PACKAGE.equals(pkg)) {
             LibHideCheck.warnIfExposed(this);
             LibHillsHooks.onPackageReady(this, param);
+            return;
+        }
+        if (ZoeIds.isLvchaPackage(pkg)) {
+            LibHideCheck.warnIfExposed(this);
+            LibLvchaHooks.onPackageReady(this, param);
             return;
         }
         if (ZoeIds.CAPYPLAYER_PACKAGE.equals(pkg)) {

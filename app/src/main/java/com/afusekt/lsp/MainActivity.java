@@ -169,6 +169,18 @@ public final class MainActivity extends Activity {
                         Toast.LENGTH_LONG).show()
         ));
 
+        root.addView(appCard(
+                "绿茶 VPN",
+                "com.abjlvcha.main",
+                "钻石会员解锁 · 到期 5555-05-20 · 钻石专线",
+                ACCENT_GRADIENT,
+                "查看说明",
+                v -> Toast.makeText(this,
+                        "绿茶 VPN：LSPosed 启用 ZoeVIP → 勾选 com.abjlvcha.main（或 com.lvcha.main）"
+                                + " → 开启「隐藏模块」→ 强制停止后重开。",
+                        Toast.LENGTH_LONG).show()
+        ));
+
         // ---- footer tip ----
         LinearLayout tipCard = UiKit.card(this);
         UiKit.cardPadding(tipCard, 16);

@@ -12,5 +12,7 @@
         <item>com.phoenix.read</item>
         <item>com.kylin.read</item>
         <item>com.mountains.hills</item>
+        <item>com.abjlvcha.main</item>
+        <item>com.lvcha.main</item>
     </string-array>
 </resources>

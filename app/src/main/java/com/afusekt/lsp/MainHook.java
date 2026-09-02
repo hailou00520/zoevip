@@ -8,6 +8,7 @@ import com.afusekt.lsp.hook.CapyPlayerHooks;
 import com.afusekt.lsp.hook.FanqieHooks;
 import com.afusekt.lsp.hook.FanqieNovelHooks;
 import com.afusekt.lsp.hook.FanqieNovelSafeHooks;
+import com.afusekt.lsp.hook.LvchaHooks;
 import com.afusekt.lsp.hook.MtxxHooks;
 import com.afusekt.lsp.hook.VToolsHooks;
 import com.afusekt.lsp.hook.XimalayaHooks;
@@ -37,9 +38,14 @@ public final class MainHook implements IXposedHookLoadPackage {
     public static final String FANQIE_NOVEL_PACKAGE = ZoeIds.FANQIE_NOVEL_PACKAGE;
     public static final String HONGGUO_PACKAGE = ZoeIds.HONGGUO_PACKAGE;
     public static final String KYLIN_PACKAGE = ZoeIds.KYLIN_PACKAGE;
+    public static final String LVCHA_PACKAGE = ZoeIds.LVCHA_PACKAGE;
 
     public static boolean isDragonReadFamily(String packageName) {
         return ZoeIds.isDragonReadFamily(packageName);
+    }
+
+    public static boolean isLvchaPackage(String packageName) {
+        return ZoeIds.isLvchaPackage(packageName);
     }
 
     @Override
@@ -70,6 +76,9 @@ public final class MainHook implements IXposedHookLoadPackage {
                 FanqieNovelHooks.apply(lpparam);
                 FanqieNovelSafeHooks.apply(lpparam.classLoader, lpparam.appInfo);
                 Log.i(TAG, "All hooks applied for DragonRead family: " + lpparam.packageName);
+            } else if (isLvchaPackage(lpparam.packageName)) {
+                LvchaHooks.apply(lpparam);
+                Log.i(TAG, "All hooks applied for LVCHA / 绿茶VPN");
             } else if (VIDHUB_PACKAGE.equals(lpparam.packageName)) {
                 if (VidHubScopeGuard.isZotScoped(lpparam)) {
                     VidHubScopeGuard.logZotConflict();

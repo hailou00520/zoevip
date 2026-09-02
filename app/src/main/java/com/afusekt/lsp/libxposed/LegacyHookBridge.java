@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo;
 import com.afusekt.lsp.ZoeIds;
 import com.afusekt.lsp.hook.AfusektHooks;
 import com.afusekt.lsp.hook.CapyPlayerHooks;
+import com.afusekt.lsp.hook.LvchaHooks;
 import com.afusekt.lsp.hook.MtxxHooks;
 import com.afusekt.lsp.hook.VToolsHooks;
 import com.afusekt.lsp.hook.XimalayaHooks;
@@ -40,6 +41,8 @@ public final class LegacyHookBridge {
             applyXimalaya(param);
         } else if (ZoeIds.MTXX_PACKAGE.equals(pkg)) {
             applyMtxx(param);
+        } else if (ZoeIds.isLvchaPackage(pkg)) {
+            applyLvcha(param);
         }
     }
 
@@ -94,6 +97,15 @@ public final class LegacyHookBridge {
             XposedBridge.log(ZoeIds.TAG + ": Meitu Xiuxiu legacy hooks applied");
         } catch (Throwable t) {
             XposedBridge.log(ZoeIds.TAG + ": Meitu Xiuxiu legacy hooks failed: " + t.getMessage());
+        }
+    }
+
+    private static void applyLvcha(XposedModuleInterface.PackageReadyParam param) {
+        try {
+            LvchaHooks.apply(buildLoadPackageParam(param));
+            XposedBridge.log(ZoeIds.TAG + ": LVCHA legacy hooks applied");
+        } catch (Throwable t) {
+            XposedBridge.log(ZoeIds.TAG + ": LVCHA legacy hooks failed: " + t.getMessage());
         }
     }
 

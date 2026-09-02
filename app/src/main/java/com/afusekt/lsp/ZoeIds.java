@@ -21,8 +21,18 @@ public final class ZoeIds {
     public static final String KYLIN_PACKAGE = "com.kylin.read";
     /** Hills 播放器（Emby/Jellyfin） */
     public static final String HILLS_PACKAGE = "com.mountains.hills";
+    /** 绿茶 VPN（NPatch 重打包包名） */
+    public static final String LVCHA_PACKAGE = "com.abjlvcha.main";
+    /** 绿茶 VPN 原始包名 */
+    public static final String LVCHA_ORIGINAL_PACKAGE = "com.lvcha.main";
 
     private ZoeIds() {
+    }
+
+    /** 绿茶 VPN：支持 NPatch 重打包与原始包名。 */
+    public static boolean isLvchaPackage(String packageName) {
+        return LVCHA_PACKAGE.equals(packageName)
+                || LVCHA_ORIGINAL_PACKAGE.equals(packageName);
     }
 
     /** 番茄小说 / 红果短剧同内核（dragon.read 组件）。 */

@@ -2,11 +2,11 @@
 
 | Field | Value |
 |-------|-------|
-| Pinned at | 2026-09-01 11:20 |
+| Pinned at | 2026-09-02 09:22 |
 | Version | 3.9.93 |
 | Git tag | restore-point |
-| Previous commit | (first pin) |
-| Note | Hills 1.7.2 已解锁 (v3.9.93) |
+| Previous commit | add3b70 |
+| Note | Lvcha UI strip + hooks (v3.9.93) |
 
 ## Restore to this point
 
