@@ -2,36 +2,50 @@ package com.afusekt.lsp;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.afusekt.lsp.ui.AdaptedAppRegistry;
+import com.afusekt.lsp.ui.AppGuideDialog;
 import com.afusekt.lsp.ui.UiColors;
 import com.afusekt.lsp.ui.UiKit;
 import com.afusekt.lsp.ui.XimalayaSettingsUi;
 
+import java.util.List;
+import java.util.Locale;
+
 /**
- * ZoeVIP home: header + list of adapted apps + shortcut into LSPosed.
- * Built from {@link UiKit} so it follows system light/dark automatically.
+ * ZoeVIP home: hero header, search/filter, adapted app list, LSPosed shortcut.
  */
 public final class MainActivity extends Activity {
 
-    private static final int[] ACCENT_GRADIENT = {0xFF3DDC97, 0xFF0B7A52};
-    private static final int[] RED_GRADIENT = {0xFFFF8A80, 0xFFC62828};
-    private static final int[] BLUE_GRADIENT = {0xFF82B1FF, 0xFF1E88E5};
-    private static final int[] ORANGE_GRADIENT = {0xFFFFCC80, 0xFFF57C00};
-    private static final int[] PURPLE_GRADIENT = {0xFFCE93D8, 0xFF7B1FA2};
-    private static final int[] TEAL_GRADIENT = {0xFF80DEEA, 0xFF00838F};
+    private static final int FILTER_ALL = 0;
+    private static final int FILTER_INSTALLED = 1;
+    private static final int FILTER_NOT_INSTALLED = 2;
+
+    private LinearLayout root;
+    private LinearLayout appListContainer;
+    private EditText searchField;
+    private TextView emptyView;
+    private TextView chipAll;
+    private TextView chipInstalled;
+    private TextView chipNotInstalled;
+    private TextView heroStat;
+
+    private int filterMode = FILTER_ALL;
+    private String searchQuery = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -42,229 +56,253 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Rebuild so install status stays fresh.
-        buildUi();
+        refreshHeroStats();
+        refreshAppList();
     }
 
     private void buildUi() {
         ScrollView scroll = UiKit.scrollRoot(this);
-        LinearLayout root = UiKit.column(this);
+        root = UiKit.column(this);
         UiKit.attach(scroll, root);
         setContentView(scroll);
         UiKit.applyStatusBar(this);
 
-        // ---- header ----
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        View logo = UiKit.appIcon(this, getPackageName(), "Z", ACCENT_GRADIENT);
-        logo.setElevation(UiKit.dp(this, 3));
-        header.addView(logo);
+        int total = AdaptedAppRegistry.all().size();
+        LinearLayout hero = UiKit.heroCard(
+                this,
+                "ZoeVIP",
+                "多应用 VIP / PRO 解锁模块 · v" + versionName(),
+                "已适配 " + total + " 个应用"
+        );
+        heroStat = (TextView) hero.getChildAt(hero.getChildCount() - 1);
+        root.addView(hero);
+        refreshHeroStats();
 
-        LinearLayout titleBlock = new LinearLayout(this);
-        titleBlock.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams titleLp = UiKit.matchWrap();
-        titleLp.leftMargin = UiKit.dp(this, 16);
-        titleBlock.setLayoutParams(titleLp);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams actionsLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 16));
+        root.addView(actions, actionsLp);
 
-        TextView brand = UiKit.display(this, "ZoeVIP");
-        titleBlock.addView(brand);
-
-        TextView subtitle = UiKit.muted(this, "多应用 VIP / PRO 解锁模块 · v" + versionName());
-        titleBlock.addView(subtitle);
-        header.addView(titleBlock);
-        root.addView(header);
-
-        // ---- primary action ----
-        Button lspButton = UiKit.filledButton(this, "打开 LSPosed");
-        LinearLayout.LayoutParams lspLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 20));
-        root.addView(lspButton, lspLp);
+        Button lspButton = UiKit.gradientButton(this, "打开 LSPosed");
         lspButton.setOnClickListener(v -> openLsposed());
+        LinearLayout.LayoutParams lspLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        actions.addView(lspButton, lspLp);
 
-        // ---- adapted apps ----
-        root.addView(UiKit.section(this, "已适配软件"));
+        Button refreshButton = UiKit.outlinedButton(this, "刷新");
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        refreshLp.leftMargin = UiKit.dp(this, 10);
+        refreshButton.setOnClickListener(v -> {
+            refreshHeroStats();
+            refreshAppList();
+            Toast.makeText(this, "已刷新", Toast.LENGTH_SHORT).show();
+        });
+        actions.addView(refreshButton, refreshLp);
 
-        root.addView(appCard(
-                "Afusekt",
-                "com.attempt.afusekt",
-                "PRO/VIP 解锁 · WebDAV 资源库同步（含刮削）",
-                ACCENT_GRADIENT,
-                "进入设置",
-                v -> startActivity(new Intent(this, AfusektSettingsActivity.class))
-        ));
+        searchField = UiKit.searchField(this, "搜索应用名或包名");
+        LinearLayout.LayoutParams searchLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 16));
+        root.addView(searchField, searchLp);
+        searchField.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
 
-        root.addView(appCard(
-                "CapyPlayer",
-                "com.feifeiduck.capyplayer",
-                "Lifetime Pro 解锁 · 无限资源库 · 全部 Pro 体验",
-                RED_GRADIENT,
-                "查看说明",
-                v -> Toast.makeText(this,
-                        "CapyPlayer 无需额外设置，启用模块并勾选作用域后重启 App 即可解锁 Pro。",
-                        Toast.LENGTH_LONG).show()
-        ));
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                searchQuery = s == null ? "" : s.toString().trim().toLowerCase(Locale.ROOT);
+                refreshAppList();
+            }
 
-        root.addView(appCard(
-                "VidHub / Media Hub",
-                "com.oumi.utility.media.hub",
-                "Lifetime VIP/PRO 解锁 · 绑定账号后自动 Pro",
-                BLUE_GRADIENT,
-                "查看说明",
-                v -> Toast.makeText(this,
-                        "VidHub：LSPosed 启用 ZoeVIP → 勾选本应用 → 开启「隐藏模块」→ 强制停止后重开。可在设置里绑定账号，Pro 由模块解锁。",
-                        Toast.LENGTH_LONG).show()
-        ));
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
 
-        root.addView(appCard(
-                "喜马拉雅",
-                "com.ximalaya.ting.android",
-                "看广告领时长 · 跳过激励视频直接领奖",
-                ORANGE_GRADIENT,
-                "进入设置",
-                v -> XimalayaSettingsUi.show(this)
-        ));
+        android.widget.HorizontalScrollView chipScroll = UiKit.chipRow(this);
+        LinearLayout chips = UiKit.chipContainer(this);
+        chipScroll.addView(chips, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams chipLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 10));
+        root.addView(chipScroll, chipLp);
 
-        root.addView(appCard(
-                "美图秀秀",
-                "com.mt.mtxx.mtxx",
-                "VIP/SVIP 会员功能解锁",
-                PURPLE_GRADIENT,
-                "查看说明",
-                v -> Toast.makeText(this,
-                        "美图秀秀：LSPosed 启用 ZoeVIP → 勾选本应用 → 开启「隐藏模块」→ 强制停止后重开。",
-                        Toast.LENGTH_LONG).show()
-        ));
+        chipAll = UiKit.chip(this, "全部", filterMode == FILTER_ALL, v -> setFilter(FILTER_ALL));
+        chipInstalled = UiKit.chip(this, "已安装", filterMode == FILTER_INSTALLED,
+                v -> setFilter(FILTER_INSTALLED));
+        chipNotInstalled = UiKit.chip(this, "未安装", filterMode == FILTER_NOT_INSTALLED,
+                v -> setFilter(FILTER_NOT_INSTALLED));
+        chips.addView(chipAll);
+        chips.addView(chipInstalled);
+        chips.addView(chipNotInstalled);
 
-        root.addView(appCard(
-                "番茄畅听",
-                "com.xs.fm",
-                "VIP 会员解锁 · 亮会员标 · 精简开屏/贴片/激励广告",
-                ACCENT_GRADIENT,
-                "查看说明",
-                v -> Toast.makeText(this,
-                        "番茄畅听：LSPosed 启用 ZoeVIP → 勾选 com.xs.fm → 强制停止后重开。",
-                        Toast.LENGTH_LONG).show()
-        ));
+        root.addView(UiKit.section(this, "已适配软件 · " + total));
 
-        root.addView(appCard(
-                "番茄免费小说",
-                "com.dragon.read",
-                "VIP 会员解锁 · 会员标 · 屏蔽不安全提示 · 免广告",
-                ORANGE_GRADIENT,
-                "查看说明",
-                v -> Toast.makeText(this,
-                "番茄小说：NPatch 用户请在 NPatch 管理器里启用 ZoeVIP 并勾选 com.dragon.read；"
-                        + "LSPosed 用户同样勾选作用域。强制停止后重开，应弹出「ZoeVIP 已注入」。",
-                        Toast.LENGTH_LONG).show()
-        ));
+        appListContainer = new LinearLayout(this);
+        appListContainer.setOrientation(LinearLayout.VERTICAL);
+        root.addView(appListContainer);
 
-        root.addView(appCard(
-                "Scene / VTools",
-                "com.omarea.vtools",
-                "工具箱 VIP 功能解锁（3.8.0 新增）",
-                TEAL_GRADIENT,
-                "查看说明",
-                v -> Toast.makeText(this,
-                        "VTools：LSPosed 启用 ZoeVIP → 勾选本应用 → 强制停止后重开。",
-                        Toast.LENGTH_LONG).show()
-        ));
+        emptyView = UiKit.muted(this, "没有匹配的应用");
+        emptyView.setGravity(Gravity.CENTER);
+        emptyView.setPadding(0, UiKit.dp(this, 24), 0, UiKit.dp(this, 24));
+        emptyView.setVisibility(View.GONE);
+        root.addView(emptyView);
 
-        root.addView(appCard(
-                "绿茶 VPN",
-                "com.abjlvcha.main",
-                "钻石会员解锁 · 到期 5555-05-20 · 钻石专线",
-                ACCENT_GRADIENT,
-                "查看说明",
-                v -> Toast.makeText(this,
-                        "绿茶 VPN：LSPosed 启用 ZoeVIP → 勾选 com.abjlvcha.main（或 com.lvcha.main）"
-                                + " → 开启「隐藏模块」→ 强制停止后重开。",
-                        Toast.LENGTH_LONG).show()
-        ));
-
-        // ---- footer tip ----
         LinearLayout tipCard = UiKit.card(this);
         UiKit.cardPadding(tipCard, 16);
         LinearLayout.LayoutParams tipLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 24));
         root.addView(tipCard, tipLp);
 
-        TextView tipTitle = UiKit.title(this, "使用步骤");
-        tipCard.addView(tipTitle);
-
-        TextView tip = UiKit.body(this,
-                "1. 打开 LSPosed → 启用 ZoeVIP\n"
-                        + "2. 勾选对应软件的作用域\n"
-                        + "3. 强制停止目标软件后重新打开");
-        LinearLayout.LayoutParams tipBodyLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 8));
-        tipCard.addView(tip, tipBodyLp);
+        tipCard.addView(UiKit.title(this, "快速上手"));
+        tipCard.addView(UiKit.numberedStep(this, 1, "打开 LSPosed → 启用 ZoeVIP 模块"),
+                UiKit.matchWrapTopMargin(UiKit.dp(this, 12)));
+        tipCard.addView(UiKit.numberedStep(this, 2, "勾选目标应用的作用域"),
+                UiKit.matchWrapTopMargin(UiKit.dp(this, 10)));
+        tipCard.addView(UiKit.numberedStep(this, 3, "强制停止目标 App 后重新打开"),
+                UiKit.matchWrapTopMargin(UiKit.dp(this, 10)));
 
         TextView version = UiKit.small(this,
                 "ZoeVIP " + versionName() + " (build " + versionCode() + ")");
-        LinearLayout.LayoutParams verLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 12));
+        LinearLayout.LayoutParams verLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 14));
         tipCard.addView(version, verLp);
+
+        refreshAppList();
     }
 
-    private View appCard(
-            String title,
-            String packageName,
-            String desc,
-            int[] gradient,
-            String actionLabel,
-            View.OnClickListener click
-    ) {
+    private void setFilter(int mode) {
+        filterMode = mode;
+        UiKit.applyChipStyle(chipAll, mode == FILTER_ALL);
+        UiKit.applyChipStyle(chipInstalled, mode == FILTER_INSTALLED);
+        UiKit.applyChipStyle(chipNotInstalled, mode == FILTER_NOT_INSTALLED);
+        refreshAppList();
+    }
+
+    private void refreshHeroStats() {
+        if (heroStat == null) {
+            return;
+        }
+        int installed = AdaptedAppRegistry.installedCount(this);
+        int total = AdaptedAppRegistry.all().size();
+        heroStat.setText("已适配 " + total + " 个应用 · 本机已安装 " + installed + " 个");
+    }
+
+    private void refreshAppList() {
+        if (appListContainer == null) {
+            return;
+        }
+        appListContainer.removeAllViews();
+        List<AdaptedAppRegistry.Entry> entries = AdaptedAppRegistry.all();
+        int shown = 0;
+        for (AdaptedAppRegistry.Entry entry : entries) {
+            if (!matchesFilter(entry)) {
+                continue;
+            }
+            if (!matchesSearch(entry)) {
+                continue;
+            }
+            appListContainer.addView(buildAppCard(entry));
+            shown++;
+        }
+        emptyView.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
+    }
+
+    private boolean matchesFilter(AdaptedAppRegistry.Entry entry) {
+        boolean installed = AdaptedAppRegistry.isInstalled(this, entry);
+        if (filterMode == FILTER_INSTALLED) {
+            return installed;
+        }
+        if (filterMode == FILTER_NOT_INSTALLED) {
+            return !installed;
+        }
+        return true;
+    }
+
+    private boolean matchesSearch(AdaptedAppRegistry.Entry entry) {
+        if (searchQuery.isEmpty()) {
+            return true;
+        }
+        if (entry.title.toLowerCase(Locale.ROOT).contains(searchQuery)) {
+            return true;
+        }
+        if (entry.packageName.toLowerCase(Locale.ROOT).contains(searchQuery)) {
+            return true;
+        }
+        for (String alt : entry.altPackages) {
+            if (alt.toLowerCase(Locale.ROOT).contains(searchQuery)) {
+                return true;
+            }
+        }
+        if (entry.adaptedVersion != null
+                && entry.adaptedVersion.toLowerCase(Locale.ROOT).contains(searchQuery)) {
+            return true;
+        }
+        AdaptedAppRegistry.InstallInfo info = AdaptedAppRegistry.getInstallInfo(this, entry);
+        if (info.installed && info.versionName.toLowerCase(Locale.ROOT).contains(searchQuery)) {
+            return true;
+        }
+        return false;
+    }
+
+    private View buildAppCard(AdaptedAppRegistry.Entry entry) {
         LinearLayout card = UiKit.card(this);
-        UiKit.cardPadding(card, 16);
+        UiKit.cardPadding(card, 10);
         LinearLayout.LayoutParams cardLp = UiKit.matchWrap();
-        cardLp.bottomMargin = UiKit.dp(this, 12);
+        cardLp.bottomMargin = UiKit.dp(this, 6);
         card.setLayoutParams(cardLp);
-        card.setOnClickListener(click);
+        card.setOnClickListener(v -> openEntry(entry));
 
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
 
-        View iconView = UiKit.appIcon(this, packageName, title.substring(0, 1), gradient);
-        top.addView(iconView);
+        row.addView(UiKit.appIconForEntry(this, entry, 36));
 
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams infoLp = UiKit.matchWrap();
-        infoLp.leftMargin = UiKit.dp(this, 14);
+        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        infoLp.leftMargin = UiKit.dp(this, 10);
         info.setLayoutParams(infoLp);
 
-        LinearLayout nameRow = new LinearLayout(this);
-        nameRow.setOrientation(LinearLayout.HORIZONTAL);
-        nameRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView name = UiKit.title(this, title);
-        nameRow.addView(name, UiKit.matchWrap());
-        boolean installed = isInstalled(packageName);
-        TextView badge = UiKit.badge(this, installed ? "已安装" : "未安装", installed);
-        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        badgeLp.leftMargin = UiKit.dp(this, 8);
-        nameRow.addView(badge, badgeLp);
-        info.addView(nameRow);
+        TextView name = UiKit.title(this, entry.title);
+        name.setTextSize(15f);
+        info.addView(name);
 
-        TextView pkg = UiKit.small(this, packageName);
-        LinearLayout.LayoutParams pkgLp = UiKit.matchWrap();
-        pkgLp.topMargin = UiKit.dp(this, 2);
-        info.addView(pkg, pkgLp);
-        top.addView(info);
-        card.addView(top);
+        String adaptedVersion = AdaptedAppRegistry.displayAdaptedVersion(entry);
+        if (!adaptedVersion.isEmpty()) {
+            TextView version = UiKit.small(this, adaptedVersion);
+            LinearLayout.LayoutParams versionLp = UiKit.matchWrap();
+            versionLp.topMargin = UiKit.dp(this, 1);
+            info.addView(version, versionLp);
+        }
 
-        TextView d = UiKit.body(this, desc);
-        LinearLayout.LayoutParams dLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 10));
-        card.addView(d, dLp);
+        row.addView(info);
 
-        TextView action = new TextView(this);
-        action.setText(actionLabel + " ›");
-        action.setTextSize(13f);
-        action.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        action.setTextColor(UiColors.accent(this));
-        LinearLayout.LayoutParams actionLp = UiKit.matchWrapTopMargin(UiKit.dp(this, 12));
-        card.addView(action, actionLp);
+        boolean installed = AdaptedAppRegistry.isInstalled(this, entry);
+        TextView status = UiKit.badge(this, installed ? "已安装" : "未安装", installed);
+        row.addView(status);
 
+        TextView chevron = new TextView(this);
+        chevron.setText("›");
+        chevron.setTextSize(18f);
+        chevron.setTextColor(UiColors.muted(this));
+        chevron.setPadding(UiKit.dp(this, 6), 0, 0, 0);
+        row.addView(chevron);
+
+        card.addView(row);
         return card;
+    }
+
+    private void openEntry(AdaptedAppRegistry.Entry entry) {
+        if (entry.action == AdaptedAppRegistry.ACTION_SETTINGS) {
+            startActivity(new Intent(this, AfusektSettingsActivity.class));
+            return;
+        }
+        if (entry.action == AdaptedAppRegistry.ACTION_XIMALAYA) {
+            XimalayaSettingsUi.show(this);
+            return;
+        }
+        AppGuideDialog.show(this, entry);
     }
 
     private void openLsposed() {
@@ -282,7 +320,6 @@ public final class MainActivity extends Activity {
                 return;
             }
         }
-        // Fallback: try common LSPosed deep link / market
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("lsposed://module"));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -291,15 +328,6 @@ public final class MainActivity extends Activity {
         } catch (Throwable ignored) {
         }
         Toast.makeText(this, "未找到 LSPosed Manager，请手动打开 LSPosed", Toast.LENGTH_LONG).show();
-    }
-
-    private boolean isInstalled(String packageName) {
-        try {
-            ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
-            return info != null;
-        } catch (PackageManager.NameNotFoundException e) {
-            return false;
-        }
     }
 
     private String versionName() {

@@ -35,7 +35,7 @@ public final class LvchaUiStrip {
         return 1;
     }
 
-    public static boolean isMainActivityPager(View view, ClassLoader cl) {
+    public static boolean isMainActivityPager(View view) {
         if (view == null) {
             return false;
         }
@@ -47,7 +47,7 @@ public final class LvchaUiStrip {
         return pagerId != 0 && view.getId() == pagerId;
     }
 
-    public static void hideNavigationPromo(ViewGroup root, ClassLoader cl) {
+    public static void hideNavigationPromo(ViewGroup root) {
         if (root == null) {
             return;
         }
@@ -69,7 +69,7 @@ public final class LvchaUiStrip {
     }
 
     /** 主页：收藏夹、抽奖/推广、图片广告、地址栏等。 */
-    public static void hideMainPagePromo(View root, ClassLoader cl) {
+    public static void hideMainPagePromo(View root) {
         if (root == null) {
             return;
         }
@@ -86,7 +86,7 @@ public final class LvchaUiStrip {
     }
 
     /** 我的页：领取黄金会员抽奖横幅等。 */
-    public static void hideMyPagePromo(View root, ClassLoader cl) {
+    public static void hideMyPagePromo(View root) {
         if (root == null) {
             return;
         }

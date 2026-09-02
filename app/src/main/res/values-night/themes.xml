@@ -13,4 +13,15 @@
         <item name="android:textColorPrimary">@color/zoe_text</item>
         <item name="android:textColorSecondary">@color/zoe_muted</item>
     </style>
+
+    <style name="Theme.ZoeVIP.Dialog" parent="android:Theme.DeviceDefault.Dialog.Alert">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+        <item name="android:colorAccent">@color/zoe_accent</item>
+        <item name="android:colorControlActivated">@color/zoe_accent</item>
+        <item name="android:colorControlHighlight">@color/zoe_ripple</item>
+        <item name="android:textColorPrimary">@color/zoe_text</item>
+        <item name="android:textColorSecondary">@color/zoe_muted</item>
+    </style>
 </resources>

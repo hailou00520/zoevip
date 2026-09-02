@@ -38,7 +38,6 @@ public final class LibHillsHooks {
     }
 
     public static void onPackageLoaded(ZoeModule module, ClassLoader cl) {
-        LibProcMapsFilter.install(module);
         LibHillsNative.installLoadMonitor(module);
         installClassLoaderMonitor(module);
         tryInstall(module, cl, "package-loaded");

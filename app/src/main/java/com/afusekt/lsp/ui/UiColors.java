@@ -205,11 +205,12 @@ public final class UiColors {
     }
 
     public static int dialogTheme(Context context) {
-        if (!isModuleApp(context)) {
-            int materialTheme = themeResource(context, "materialAlertDialogTheme", 0);
-            if (materialTheme != 0) {
-                return materialTheme;
-            }
+        if (isModuleApp(context)) {
+            return R.style.Theme_ZoeVIP_Dialog;
+        }
+        int materialTheme = themeResource(context, "materialAlertDialogTheme", 0);
+        if (materialTheme != 0) {
+            return materialTheme;
         }
         TypedValue value = new TypedValue();
         if (context.getTheme().resolveAttribute(android.R.attr.alertDialogTheme, value, true)

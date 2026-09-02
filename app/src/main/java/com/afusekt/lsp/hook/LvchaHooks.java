@@ -1,11 +1,11 @@
 package com.afusekt.lsp.hook;
 
 import android.app.Application;
-import android.os.Bundle;
 import android.view.View;
-import android.view.ViewGroup;
 
+import com.afusekt.lsp.LvchaHookSupport;
 import com.afusekt.lsp.LvchaUiStrip;
+import com.afusekt.lsp.LvchaUiStripHooks;
 import com.afusekt.lsp.LvchaUnlockConfig;
 import com.afusekt.lsp.MainHook;
 import com.afusekt.lsp.ZoeIds;
@@ -18,7 +18,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 import java.lang.reflect.Method;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -28,13 +27,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class LvchaHooks {
 
     private static final String TAG = MainHook.TAG + ":Lvcha";
-    /** Runtime dex type is {@code Lvs1;} (default package). Jadx shows {@code defpackage.vs1}. */
-    private static final String USER_MANAGER = "vs1";
-    private static final String CIRCLE_FRAGMENT = "com.lvcha.main.fragment.CircleFragment";
-    private static final String MAIN_FRAGMENT = "com.lvcha.main.fragment.MainFragment";
-    private static final String MY_FRAGMENT = "com.lvcha.main.fragment.MyFragment";
-    private static final String MAIN_ACTIVITY = "com.lvcha.main.activity.MainActivity";
-    private static final String TOP_VIEW = "com.lvcha.main.View.TopView";
 
     private static final AtomicBoolean INSTALLED = new AtomicBoolean(false);
     private static final AtomicBoolean CLASS_LOADER_MONITOR = new AtomicBoolean(false);
@@ -47,14 +39,14 @@ public final class LvchaHooks {
         if (!ZoeIds.isLvchaPackage(lpparam.packageName)) {
             return;
         }
-        installClassLoaderMonitor(lpparam.classLoader);
+        installClassLoaderMonitor();
         tryInstall(lpparam.classLoader, "load-package");
         hookApplicationOnCreate(lpparam.classLoader);
         scheduleRetry(lpparam.classLoader);
     }
 
     private static void scheduleRetry(ClassLoader cl) {
-        for (long delay : new long[]{300L, 800L, 1500L, 3000L, 6000L, 12000L}) {
+        for (long delay : LvchaHookSupport.RETRY_DELAYS_MS) {
             Thread t = new Thread(() -> {
                 try {
                     Thread.sleep(delay);
@@ -85,7 +77,7 @@ public final class LvchaHooks {
         }
     }
 
-    private static void installClassLoaderMonitor(ClassLoader seed) {
+    private static void installClassLoaderMonitor() {
         if (!CLASS_LOADER_MONITOR.compareAndSet(false, true)) {
             return;
         }
@@ -99,7 +91,7 @@ public final class LvchaHooks {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             String name = (String) param.args[0];
-                            if (isUserManagerClass(name)) {
+                            if (LvchaHookSupport.isUserManagerClass(name)) {
                                 tryInstall((ClassLoader) param.thisObject, "loadClass:" + name);
                             }
                         }
@@ -112,16 +104,12 @@ public final class LvchaHooks {
         }
     }
 
-    private static boolean isUserManagerClass(String name) {
-        return "vs1".equals(name) || USER_MANAGER.equals(name) || name != null && name.endsWith(".vs1");
-    }
-
     private static void tryInstall(ClassLoader cl, String source) {
         if (INSTALLED.get()) {
             return;
         }
         try {
-            Class.forName(USER_MANAGER, false, cl);
+            Class.forName(LvchaHookSupport.USER_MANAGER, false, cl);
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": hooks deferred (" + source + "): " + t.getMessage());
             return;
@@ -151,242 +139,16 @@ public final class LvchaHooks {
         return count;
     }
 
-    /** UI 精简：去导航 Tab、主页收藏夹/广告/抽奖/推广等。 */
     private static int installUiStripHooks(ClassLoader cl) {
-        int count = 0;
-        count += hookCircleFragmentStrip(cl);
-        count += hookTopViewStrip(cl);
-        count += hookMainFragmentStrip(cl);
-        count += hookMyFragmentStrip(cl);
-        count += hookMainActivityStrip(cl);
+        int count = LvchaUiStripHooks.install(new ClassicUiBackend(), cl);
         count += hookReturn(cl, "z", null);
-        return count;
-    }
-
-    private static int hookCircleFragmentStrip(ClassLoader cl) {
-        int count = 0;
-        try {
-            Class<?> circleFragment = Class.forName(CIRCLE_FRAGMENT, false, cl);
-            Method render = circleFragment.getDeclaredMethod("x", ViewGroup.class);
-            render.setAccessible(true);
-            if (HOOKED.add(hookId(circleFragment, render))) {
-                XposedBridge.hookMethod(render, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        if (param.args[0] instanceof ViewGroup viewGroup) {
-                            LvchaUiStrip.hideNavigationPromo(viewGroup, cl);
-                        }
-                    }
-                });
-                count++;
-            }
-            Method fetchAds = circleFragment.getDeclaredMethod("z");
-            fetchAds.setAccessible(true);
-            if (HOOKED.add(hookId(circleFragment, fetchAds))) {
-                XposedBridge.hookMethod(fetchAds, XC_MethodReplacement.returnConstant(null));
-                count++;
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": CircleFragment strip failed: " + t.getMessage());
-        }
-        return count;
-    }
-
-    private static int hookTopViewStrip(ClassLoader cl) {
-        int count = 0;
-        try {
-            Class<?> topView = Class.forName(TOP_VIEW, false, cl);
-            Method setData = topView.getDeclaredMethod("setData", List.class);
-            setData.setAccessible(true);
-            if (HOOKED.add(hookId(topView, setData))) {
-                XposedBridge.hookMethod(setData, new XC_MethodReplacement() {
-                    @Override
-                    protected Object replaceHookedMethod(MethodHookParam param) {
-                        if (param.thisObject instanceof View view) {
-                            LvchaUiStrip.hideTopBanner(view);
-                        }
-                        return null;
-                    }
-                });
-                count++;
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": TopView strip failed: " + t.getMessage());
-        }
-        return count;
-    }
-
-    private static int hookMainFragmentStrip(ClassLoader cl) {
-        int count = 0;
-        try {
-            Class<?> mainFragment = Class.forName(MAIN_FRAGMENT, false, cl);
-            Method onCreateView = mainFragment.getDeclaredMethod(
-                    "onCreateView",
-                    android.view.LayoutInflater.class,
-                    ViewGroup.class,
-                    Bundle.class
-            );
-            if (HOOKED.add(hookId(mainFragment, onCreateView))) {
-                XposedBridge.hookMethod(onCreateView, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        if (param.getResult() instanceof View view) {
-                            LvchaUiStrip.hideMainPagePromo(view, cl);
-                        }
-                    }
-                });
-                count++;
-            }
-            Method refreshBanner = mainFragment.getDeclaredMethod("v");
-            refreshBanner.setAccessible(true);
-            if (HOOKED.add(hookId(mainFragment, refreshBanner))) {
-                XposedBridge.hookMethod(refreshBanner, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        LvchaUiStrip.forceHideMainActiveBanner(param.thisObject);
-                    }
-                });
-                count++;
-            }
-
-            Method onResume = mainFragment.getDeclaredMethod("onResume");
-            if (HOOKED.add(hookId(mainFragment, onResume))) {
-                XposedBridge.hookMethod(onResume, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        try {
-                            Method getView = param.thisObject.getClass().getMethod("getView");
-                            Object view = getView.invoke(param.thisObject);
-                            if (view instanceof View root) {
-                                LvchaUiStrip.hideMainPagePromo(root, cl);
-                            }
-                            LvchaUiStrip.forceHideMainActiveBanner(param.thisObject);
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                });
-                count++;
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": MainFragment strip failed: " + t.getMessage());
-        }
-        return count;
-    }
-
-    private static int hookMyFragmentStrip(ClassLoader cl) {
-        int count = 0;
-        try {
-            Class<?> myFragment = Class.forName(MY_FRAGMENT, false, cl);
-            Method onCreateView = myFragment.getDeclaredMethod(
-                    "onCreateView",
-                    android.view.LayoutInflater.class,
-                    ViewGroup.class,
-                    Bundle.class
-            );
-            if (HOOKED.add(hookId(myFragment, onCreateView))) {
-                XposedBridge.hookMethod(onCreateView, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        if (param.getResult() instanceof View view) {
-                            LvchaUiStrip.hideMyPagePromo(view, cl);
-                        }
-                    }
-                });
-                count++;
-            }
-            Method onResume = myFragment.getDeclaredMethod("onResume");
-            if (HOOKED.add(hookId(myFragment, onResume))) {
-                XposedBridge.hookMethod(onResume, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        try {
-                            Method getView = param.thisObject.getClass().getMethod("getView");
-                            Object view = getView.invoke(param.thisObject);
-                            if (view instanceof View root) {
-                                LvchaUiStrip.hideMyPagePromo(root, cl);
-                            }
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                });
-                count++;
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": MyFragment strip failed: " + t.getMessage());
-        }
-        return count;
-    }
-
-    private static int hookMainActivityStrip(ClassLoader cl) {
-        int count = 0;
-        try {
-            Class<?> mainActivity = Class.forName(MAIN_ACTIVITY, false, cl);
-            Method onCreate = mainActivity.getDeclaredMethod("onCreate", Bundle.class);
-            if (HOOKED.add(hookId(mainActivity, onCreate))) {
-                XposedBridge.hookMethod(onCreate, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        LvchaUiStrip.stripNavigationTab(param.thisObject, cl);
-                    }
-                });
-                count++;
-            }
-
-            Method onResume = mainActivity.getDeclaredMethod("onResume");
-            if (HOOKED.add(hookId(mainActivity, onResume))) {
-                XposedBridge.hookMethod(onResume, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        LvchaUiStrip.stripNavigationTab(param.thisObject, cl);
-                    }
-                });
-                count++;
-            }
-            Method highlightTab = mainActivity.getDeclaredMethod("w", int.class);
-            highlightTab.setAccessible(true);
-            if (HOOKED.add(hookId(mainActivity, highlightTab))) {
-                XposedBridge.hookMethod(highlightTab, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        if (param.args[0] instanceof Integer index && index <= 1) {
-                            LvchaUiStrip.applyTabHighlight(param.thisObject, index);
-                            param.setResult(null);
-                        }
-                    }
-                });
-                count++;
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": MainActivity strip failed: " + t.getMessage());
-        }
-
-        try {
-            Class<?> viewPagerCls = Class.forName("androidx.viewpager.widget.ViewPager", false, cl);
-            XC_MethodHook remapPager = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    if (param.thisObject instanceof View view
-                            && LvchaUiStrip.isMainActivityPager(view, cl)
-                            && param.args[0] instanceof Integer index) {
-                        param.args[0] = LvchaUiStrip.remapMainPagerIndex(index);
-                    }
-                }
-            };
-            XposedHelpers.findAndHookMethod(
-                    viewPagerCls, "setCurrentItem", int.class, boolean.class, remapPager);
-            XposedHelpers.findAndHookMethod(
-                    viewPagerCls, "setCurrentItem", int.class, remapPager);
-            count += 2;
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": ViewPager remap failed: " + t.getMessage());
-        }
         return count;
     }
 
     private static int hookDynamicLong(ClassLoader cl, String methodName) {
         try {
-            Class<?> cls = Class.forName(USER_MANAGER, false, cl);
-            Method method = findNoArgMethod(cls, methodName);
+            Class<?> cls = Class.forName(LvchaHookSupport.USER_MANAGER, false, cl);
+            Method method = LvchaHookSupport.findNoArgMethod(cls, methodName);
             if (method == null) {
                 XposedBridge.log(TAG + ": method not found: " + methodName);
                 return 0;
@@ -410,8 +172,8 @@ public final class LvchaHooks {
 
     private static int hookReturn(ClassLoader cl, String methodName, Object value) {
         try {
-            Class<?> cls = Class.forName(USER_MANAGER, false, cl);
-            Method method = findNoArgMethod(cls, methodName);
+            Class<?> cls = Class.forName(LvchaHookSupport.USER_MANAGER, false, cl);
+            Method method = LvchaHookSupport.findNoArgMethod(cls, methodName);
             if (method == null) {
                 XposedBridge.log(TAG + ": method not found: " + methodName);
                 return 0;
@@ -428,17 +190,74 @@ public final class LvchaHooks {
         }
     }
 
-    private static Method findNoArgMethod(Class<?> cls, String name) {
-        for (Method method : cls.getDeclaredMethods()) {
-            if (method.getName().equals(name) && method.getParameterTypes().length == 0) {
-                return method;
-            }
+    private static final class ClassicUiBackend implements LvchaUiStripHooks.Backend {
+        @Override
+        public boolean register(Method method) {
+            return HOOKED.add(LvchaHookSupport.hookId(method));
         }
-        return null;
-    }
 
-    private static String hookId(Class<?> cls, Method method) {
-        return cls.getName() + "#" + method.getName()
-                + "(" + method.getParameterTypes().length + ")";
+        @Override
+        public void hookAfter(Method method, LvchaUiStripHooks.AfterListener listener) {
+            XposedBridge.hookMethod(method, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    listener.onAfter(param.thisObject, param.args, param.getResult());
+                }
+            });
+        }
+
+        @Override
+        public void hookReplaceNull(Method method) {
+            XposedBridge.hookMethod(method, XC_MethodReplacement.returnConstant(null));
+        }
+
+        @Override
+        public void hookReplace(Method method, LvchaUiStripHooks.ReplaceListener listener) {
+            XposedBridge.hookMethod(method, new XC_MethodReplacement() {
+                @Override
+                protected Object replaceHookedMethod(MethodHookParam param) {
+                    return listener.replace(param.thisObject, param.args);
+                }
+            });
+        }
+
+        @Override
+        public void hookShortCircuit(Method method, LvchaUiStripHooks.ShortCircuitListener listener) {
+            XposedBridge.hookMethod(method, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (listener.skipOriginal(param.thisObject, param.args)) {
+                        param.setResult(null);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public int installViewPagerRemap(ClassLoader cl) {
+            int count = 0;
+            try {
+                Class<?> viewPagerCls = Class.forName(
+                        "androidx.viewpager.widget.ViewPager", false, cl);
+                XC_MethodHook remapPager = new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        if (param.thisObject instanceof View view
+                                && LvchaUiStrip.isMainActivityPager(view)
+                                && param.args[0] instanceof Integer index) {
+                            param.args[0] = LvchaUiStrip.remapMainPagerIndex(index);
+                        }
+                    }
+                };
+                XposedHelpers.findAndHookMethod(
+                        viewPagerCls, "setCurrentItem", int.class, boolean.class, remapPager);
+                XposedHelpers.findAndHookMethod(
+                        viewPagerCls, "setCurrentItem", int.class, remapPager);
+                count += 2;
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + ": ViewPager remap failed: " + t.getMessage());
+            }
+            return count;
+        }
     }
 }

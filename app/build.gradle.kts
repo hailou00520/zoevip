@@ -87,3 +87,15 @@ dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("androidx.annotation:annotation:1.8.2")
 }
+
+tasks.register<Copy>("copyReleaseApk") {
+    from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+    into(layout.projectDirectory.dir("../output"))
+    rename { "zoevip-lsp.apk" }
+}
+
+afterEvaluate {
+    tasks.named("assembleRelease") {
+        finalizedBy("copyReleaseApk")
+    }
+}

@@ -26,8 +26,8 @@ import android.widget.TextView;
  * ZoeVIP unified design system (pure-code, Material 3 inspired).
  *
  * <p>Every module screen (home, settings, dialogs) builds from these primitives so the
- * whole app shares one look: system light/dark aware colors, rounded corners, elevation
- * shadows, ripple feedback and consistent typography.</p>
+ * whole app shares one look: system light/dark aware colors, rounded corners, flat
+ * surfaces, ripple feedback and consistent typography.</p>
  */
 public final class UiKit {
 
@@ -39,6 +39,20 @@ public final class UiKit {
     }
 
     // ---------------------------------------------------------------- dims
+
+    /** Strip platform default elevation/shadow (keeps cards visually flat). */
+    public static void flatten(View view) {
+        if (view == null) {
+            return;
+        }
+        view.setElevation(0f);
+        view.setTranslationZ(0f);
+        view.setStateListAnimator(null);
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            view.setOutlineAmbientShadowColor(Color.TRANSPARENT);
+            view.setOutlineSpotShadowColor(Color.TRANSPARENT);
+        }
+    }
 
     public static int dp(Context context, int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
@@ -85,9 +99,190 @@ public final class UiKit {
         return lp;
     }
 
+    public static LinearLayout.LayoutParams matchWrapLeftMargin(int dp) {
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.leftMargin = dp;
+        return lp;
+    }
+
+    /** Horizontal chip row container. */
+    public static android.widget.HorizontalScrollView chipRow(Activity activity) {
+        android.widget.HorizontalScrollView scroll =
+                new android.widget.HorizontalScrollView(activity);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(0, 0, 0, 0);
+        return scroll;
+    }
+
+    public static LinearLayout chipContainer(Activity activity) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        return row;
+    }
+
+    /** Filter / tag chip. */
+    public static TextView chip(
+            Context context,
+            CharSequence text,
+            boolean selected,
+            View.OnClickListener listener
+    ) {
+        TextView chip = new TextView(context);
+        chip.setText(text);
+        chip.setTextSize(13f);
+        chip.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        chip.setGravity(Gravity.CENTER);
+        int hPad = dp(context, 14);
+        int vPad = dp(context, 8);
+        chip.setPadding(hPad, vPad, hPad, vPad);
+        applyChipStyle(chip, selected);
+        chip.setOnClickListener(listener);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = dp(context, 8);
+        chip.setLayoutParams(lp);
+        return chip;
+    }
+
+    public static void applyChipStyle(TextView chip, boolean selected) {
+        Context context = chip.getContext();
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(context, 20));
+        if (selected) {
+            bg.setColor(UiColors.accent(context));
+            chip.setTextColor(UiColors.onAccent(context));
+        } else {
+            bg.setColor(UiColors.surfaceVariant(context));
+            chip.setTextColor(UiColors.text(context));
+        }
+        chip.setBackground(bg);
+    }
+
+    /** Search field with rounded surface fill. */
+    public static EditText searchField(Context context, CharSequence hint) {
+        EditText input = field(context, hint);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(UiColors.surfaceVariant(context));
+        bg.setCornerRadius(dp(context, Math.round(FIELD_RADIUS_DP)));
+        input.setBackground(bg);
+        input.setCompoundDrawablePadding(dp(context, 8));
+        flatten(input);
+        return input;
+    }
+
+    /** Hero banner with brand gradient. */
+    public static LinearLayout heroCard(
+            Activity activity,
+            CharSequence title,
+            CharSequence subtitle,
+            CharSequence statLine
+    ) {
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        int radius = dp(activity, Math.round(CARD_RADIUS_DP));
+        GradientDrawable bg = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{UiColors.accent(activity), 0xFF064D36});
+        bg.setCornerRadius(radius);
+        card.setBackground(bg);
+        int pad = dp(activity, 20);
+        card.setPadding(pad, pad, pad, pad);
+
+        TextView t = new TextView(activity);
+        t.setText(title);
+        t.setTextSize(28f);
+        t.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
+        t.setTextColor(Color.WHITE);
+        card.addView(t);
+
+        TextView sub = new TextView(activity);
+        sub.setText(subtitle);
+        sub.setTextSize(13f);
+        sub.setTextColor(0xCCFFFFFF);
+        sub.setLineSpacing(0, 1.2f);
+        LinearLayout.LayoutParams subLp = matchWrapTopMargin(dp(activity, 6));
+        card.addView(sub, subLp);
+
+        if (statLine != null && statLine.length() > 0) {
+            TextView stat = new TextView(activity);
+            stat.setText(statLine);
+            stat.setTextSize(12f);
+            stat.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            stat.setTextColor(0xE6FFFFFF);
+            GradientDrawable pill = new GradientDrawable();
+            pill.setColor(0x33FFFFFF);
+            pill.setCornerRadius(dp(activity, 12));
+            stat.setBackground(pill);
+            int pillPad = dp(activity, 10);
+            stat.setPadding(pillPad, dp(activity, 6), pillPad, dp(activity, 6));
+            LinearLayout.LayoutParams statLp = matchWrapTopMargin(dp(activity, 14));
+            card.addView(stat, statLp);
+        }
+        flatten(card);
+        return card;
+    }
+
+    /** Gradient primary button (matches hero). */
+    public static Button gradientButton(Context context, CharSequence text) {
+        Button b = new Button(context);
+        b.setText(text);
+        b.setAllCaps(false);
+        b.setTextSize(15f);
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        b.setTextColor(Color.WHITE);
+        GradientDrawable bg = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{UiColors.accent(context), 0xFF0B7A52});
+        bg.setCornerRadius(dp(context, Math.round(BUTTON_RADIUS_DP)));
+        b.setBackground(bg);
+        int h = dp(context, 14);
+        int w = dp(context, 16);
+        b.setPadding(w, h, w, h);
+        flatten(b);
+        return b;
+    }
+
+    public static View divider(Context context) {
+        View line = new View(context);
+        line.setBackgroundColor(UiColors.outline(context));
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.topMargin = dp(context, 12);
+        lp.height = dp(context, 1);
+        line.setLayoutParams(lp);
+        return line;
+    }
+
+    /** Numbered step line for tips section. */
+    public static LinearLayout numberedStep(Context context, int number, CharSequence text) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.TOP);
+
+        TextView num = new TextView(context);
+        num.setText(String.valueOf(number));
+        num.setTextSize(12f);
+        num.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        num.setTextColor(UiColors.onAccent(context));
+        num.setGravity(Gravity.CENTER);
+        int numSize = dp(context, 22);
+        num.setLayoutParams(new LinearLayout.LayoutParams(numSize, numSize));
+        num.setBackground(rounded(context, UiColors.accent(context), 11));
+
+        TextView body = body(context, text);
+        LinearLayout.LayoutParams bodyLp = matchWrapLeftMargin(dp(context, 10));
+        body.setLayoutParams(bodyLp);
+
+        row.addView(num);
+        row.addView(body);
+        return row;
+    }
+
     // ---------------------------------------------------------------- cards
 
-    /** Rounded surface card with ripple + elevation shadow. */
+    /** Rounded surface card with ripple and hairline border (flat, no shadow). */
     public static LinearLayout card(Context context) {
         return card(context, CARD_RADIUS_DP);
     }
@@ -99,6 +294,7 @@ public final class UiKit {
         GradientDrawable content = new GradientDrawable();
         content.setColor(UiColors.surface(context));
         content.setCornerRadius(radius);
+        content.setStroke(dp(context, 1), UiColors.outline(context));
         GradientDrawable mask = new GradientDrawable();
         mask.setCornerRadius(radius);
         mask.setColor(Color.WHITE);
@@ -107,15 +303,59 @@ public final class UiKit {
                 content,
                 mask);
         card.setBackground(ripple);
-        card.setElevation(dp(context, 2));
         card.setClickable(true);
         card.setFocusable(true);
+        flatten(card);
         return card;
     }
 
     public static void cardPadding(View card, int padDp) {
         int p = dp(card.getContext(), padDp);
         card.setPadding(p, p, p, p);
+    }
+
+    /** Flat dialog panel (single surface, hairline border, no nested cards). */
+    public static LinearLayout dialogPanel(Context context) {
+        LinearLayout panel = new LinearLayout(context);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        int radius = dp(context, 16);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(UiColors.surface(context));
+        bg.setCornerRadius(radius);
+        bg.setStroke(dp(context, 1), UiColors.outline(context));
+        panel.setBackground(bg);
+        flatten(panel);
+        return panel;
+    }
+
+    public static void applyDialogWindow(android.app.Dialog dialog) {
+        if (dialog == null || dialog.getWindow() == null) {
+            return;
+        }
+        android.view.Window window = dialog.getWindow();
+        window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        window.setDimAmount(0.58f);
+        android.view.WindowManager.LayoutParams params = window.getAttributes();
+        int margin = dp(dialog.getContext(), 24);
+        params.width = android.view.WindowManager.LayoutParams.MATCH_PARENT;
+        params.horizontalMargin = margin;
+        window.setAttributes(params);
+        flatten(window.getDecorView());
+    }
+
+    /** Build and show a flat themed dialog with transparent window chrome. */
+    public static android.app.AlertDialog showDialog(
+            Activity activity,
+            View content
+    ) {
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(
+                activity,
+                UiColors.dialogTheme(activity))
+                .setView(content)
+                .create();
+        dialog.show();
+        applyDialogWindow(dialog);
+        return dialog;
     }
 
     // ---------------------------------------------------------------- typography
@@ -221,10 +461,10 @@ public final class UiKit {
         bg.setColor(UiColors.accent(context));
         bg.setCornerRadius(dp(context, Math.round(BUTTON_RADIUS_DP)));
         b.setBackground(bg);
-        b.setElevation(dp(context, 2));
         int h = dp(context, 14);
         int w = dp(context, 16);
         b.setPadding(w, h, w, h);
+        flatten(b);
         return b;
     }
 
@@ -243,6 +483,7 @@ public final class UiKit {
         int h = dp(context, 14);
         int w = dp(context, 16);
         b.setPadding(w, h, w, h);
+        flatten(b);
         return b;
     }
 
@@ -262,6 +503,7 @@ public final class UiKit {
         int h = dp(context, 14);
         int w = dp(context, 16);
         b.setPadding(w, h, w, h);
+        flatten(b);
         return b;
     }
 
@@ -275,6 +517,7 @@ public final class UiKit {
         b.setTextColor(UiColors.accent(context));
         b.setBackground(null);
         b.setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8));
+        flatten(b);
         return b;
     }
 
@@ -294,6 +537,7 @@ public final class UiKit {
         bg.setCornerRadius(dp(context, Math.round(FIELD_RADIUS_DP)));
         bg.setStroke(dp(context, 1), UiColors.outline(context));
         input.setBackground(bg);
+        flatten(input);
         return input;
     }
 
@@ -319,41 +563,79 @@ public final class UiKit {
 
     // ---------------------------------------------------------------- app icon
 
-    /** App icon (real installed icon, or letter avatar fallback). */
-    public static View appIcon(Context context, String packageName, String fallbackText, int[] gradient) {
+    /** App icon for an adapted entry (installed launcher icon, else bundled fallback). */
+    public static View appIconForEntry(Context context, AdaptedAppRegistry.Entry entry) {
+        return appIconForEntry(context, entry, 40);
+    }
+
+    public static View appIconForEntry(Context context, AdaptedAppRegistry.Entry entry, int sizeDp) {
+        Drawable icon = resolveInstalledIcon(context, entry);
+        if (icon == null) {
+            icon = bundledIcon(context, entry.iconRes);
+        }
+        return appIconDrawable(context, icon, sizeDp);
+    }
+
+    /** App icon (installed launcher icon, else bundled fallback). */
+    public static View appIcon(Context context, String packageName, int fallbackIconRes) {
         Drawable icon = null;
-        boolean installed = false;
         try {
-            ApplicationInfo info = context.getPackageManager()
-                    .getApplicationInfo(packageName, 0);
+            ApplicationInfo info = context.getPackageManager().getApplicationInfo(packageName, 0);
             icon = context.getPackageManager().getApplicationIcon(info);
-            installed = true;
         } catch (Throwable ignored) {
         }
-
-        int size = dp(context, 44);
-        if (installed && icon != null) {
-            ImageView image = new ImageView(context);
-            image.setLayoutParams(new LinearLayout.LayoutParams(size, size));
-            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            image.setImageDrawable(icon);
-            return image;
+        if (icon == null) {
+            icon = bundledIcon(context, fallbackIconRes);
         }
+        return appIconDrawable(context, icon, 40);
+    }
 
-        // Letter avatar with per-app gradient.
-        TextView letter = new TextView(context);
-        letter.setLayoutParams(new LinearLayout.LayoutParams(size, size));
-        letter.setText(fallbackText);
-        letter.setTextColor(Color.WHITE);
-        letter.setTextSize(18f);
-        letter.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-        letter.setGravity(Gravity.CENTER);
-        GradientDrawable bg = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{gradient[0], gradient[1]});
-        bg.setCornerRadius(size / 2f);
-        letter.setBackground(bg);
-        return letter;
+    private static Drawable bundledIcon(Context context, int iconRes) {
+        if (iconRes == 0) {
+            return null;
+        }
+        try {
+            return context.getDrawable(iconRes);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Drawable resolveInstalledIcon(Context context, AdaptedAppRegistry.Entry entry) {
+        PackageManager pm = context.getPackageManager();
+        for (String pkg : AdaptedAppRegistry.allPackages(entry)) {
+            try {
+                if (pm.getLaunchIntentForPackage(pkg) == null) {
+                    continue;
+                }
+                ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
+                return pm.getApplicationIcon(info);
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
+    private static ImageView appIconDrawable(Context context, Drawable icon, int sizeDp) {
+        if (icon == null) {
+            icon = context.getDrawable(android.R.drawable.sym_def_app_icon);
+        }
+        int size = dp(context, sizeDp);
+        int radius = dp(context, Math.max(8, sizeDp / 4));
+        ImageView image = new ImageView(context);
+        image.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setAdjustViewBounds(true);
+        image.setImageDrawable(icon);
+        image.setClipToOutline(true);
+        image.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, android.graphics.Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+            }
+        });
+        flatten(image);
+        return image;
     }
 
     /** Rounded corners on any view (e.g. badges inside cards). */

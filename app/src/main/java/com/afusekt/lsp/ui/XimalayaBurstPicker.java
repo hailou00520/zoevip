@@ -5,11 +5,11 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -38,102 +38,109 @@ public final class XimalayaBurstPicker {
             return;
         }
         int safeDefault = XimalayaPrefs.clampBurstCount(defaultCount);
-        ScrollView scroll = new ScrollView(activity);
-        int pad = dp(activity, 20);
-        scroll.setPadding(pad, dp(activity, 8), pad, dp(activity, 4));
 
-        LinearLayout content = new LinearLayout(activity);
-        content.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(content, matchWrap());
+        int pad = UiKit.dp(activity, 16);
+        LinearLayout panel = UiKit.dialogPanel(activity);
+        panel.setPadding(pad, pad, pad, pad);
 
-        TextView hint = new TextView(activity);
-        hint.setText("每次约 +20 分钟，选好后后台静默连领，无需等待 loading。");
-        hint.setTextSize(14f);
-        hint.setTextColor(UiColors.text(activity));
-        hint.setLineSpacing(0, 1.2f);
-        hint.setPadding(0, 0, 0, dp(activity, 12));
-        content.addView(hint, matchWrap());
+        TextView title = UiKit.title(activity, "自动领取次数");
+        title.setTextSize(17f);
+        panel.addView(title);
 
-        AlertDialog dialog = new AlertDialog.Builder(activity, UiColors.dialogTheme(activity))
-                .setTitle("自动领取次数")
-                .setView(scroll)
-                .setNegativeButton("取消", (d, which) -> {
-                    if (listener != null) {
-                        listener.onCancelled();
-                    }
-                })
-                .setOnCancelListener(d -> {
-                    if (listener != null) {
-                        listener.onCancelled();
-                    }
-                })
-                .create();
+        TextView hint = UiKit.body(activity, "每次约 +20 分钟，选好后后台静默连领，无需等待 loading。");
+        hint.setTextSize(13f);
+        LinearLayout.LayoutParams hintLp = UiKit.matchWrapTopMargin(UiKit.dp(activity, 8));
+        panel.addView(hint, hintLp);
 
+        java.util.ArrayList<Button> presetButtons = new java.util.ArrayList<>();
         for (int preset : PRESETS) {
-            content.addView(optionButton(activity, formatPreset(preset), () -> {
+            Button button = optionButton(activity, formatPreset(preset));
+            presetButtons.add(button);
+            panel.addView(button, UiKit.matchWrapTopMargin(UiKit.dp(activity, 8)));
+        }
+
+        Button customBtn = UiKit.outlinedButton(activity, "自定义次数…");
+        panel.addView(customBtn, UiKit.matchWrapTopMargin(UiKit.dp(activity, 8)));
+
+        AlertDialog dialog = UiKit.showDialog(activity, panel);
+        for (int i = 0; i < PRESETS.length; i++) {
+            final int preset = PRESETS[i];
+            presetButtons.get(i).setOnClickListener(v -> {
                 dialog.dismiss();
                 finish(activity, preset, listener);
-            }));
+            });
         }
-        content.addView(optionButton(activity, "自定义次数…", () -> {
+        customBtn.setOnClickListener(v -> {
             dialog.dismiss();
             showCustomInput(activity, safeDefault, listener);
-        }));
-
-        dialog.show();
+        });
     }
 
-    private static Button optionButton(Activity activity, String label, Runnable action) {
+    private static Button optionButton(Activity activity, String label) {
         Button button = UiKit.tonalButton(activity, label);
-        button.setGravity(android.view.Gravity.CENTER);
+        button.setGravity(Gravity.CENTER);
         button.setTypeface(Typeface.DEFAULT);
-        LinearLayout.LayoutParams lp = matchWrap();
-        lp.bottomMargin = dp(activity, 8);
-        button.setLayoutParams(lp);
-        button.setOnClickListener(v -> action.run());
         return button;
     }
 
     private static void showCustomInput(Activity activity, int defaultCount, Listener listener) {
-        EditText input = new EditText(activity);
+        int pad = UiKit.dp(activity, 16);
+        LinearLayout panel = UiKit.dialogPanel(activity);
+        panel.setPadding(pad, pad, pad, pad);
+
+        TextView title = UiKit.title(activity, "自定义次数");
+        title.setTextSize(17f);
+        panel.addView(title);
+
+        TextView hint = UiKit.small(activity, "1 ~ " + XimalayaPrefs.MAX_BURST_COUNT + " 次");
+        LinearLayout.LayoutParams hintLp = UiKit.matchWrapTopMargin(UiKit.dp(activity, 6));
+        panel.addView(hint, hintLp);
+
+        EditText input = UiKit.field(activity, "次数");
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
         input.setText(String.valueOf(defaultCount));
         input.setSelection(input.getText().length());
-        input.setTextColor(UiColors.text(activity));
-        int pad = dp(activity, 20);
-        LinearLayout wrap = new LinearLayout(activity);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(pad, dp(activity, 8), pad, 0);
-        wrap.addView(input, matchWrap());
+        LinearLayout.LayoutParams inputLp = UiKit.matchWrapTopMargin(UiKit.dp(activity, 10));
+        panel.addView(input, inputLp);
 
-        new AlertDialog.Builder(activity, UiColors.dialogTheme(activity))
-                .setTitle("自定义次数")
-                .setMessage("1 ~ " + XimalayaPrefs.MAX_BURST_COUNT + " 次")
-                .setView(wrap)
-                .setPositiveButton("开始", (dialog, which) -> {
-                    int count;
-                    try {
-                        count = Integer.parseInt(input.getText().toString().trim());
-                    } catch (NumberFormatException e) {
-                        Toast.makeText(activity, "请输入有效数字", Toast.LENGTH_SHORT).show();
-                        if (listener != null) {
-                            listener.onCancelled();
-                        }
-                        return;
-                    }
-                    finish(activity, count, listener);
-                })
-                .setNegativeButton("取消", (dialog, which) -> {
-                    if (listener != null) {
-                        listener.onCancelled();
-                    }
-                })
-                .setOnCancelListener(dialog -> {
-                    if (listener != null) {
-                        listener.onCancelled();
-                    }
-                })
-                .show();
+        LinearLayout actions = new LinearLayout(activity);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.END);
+        LinearLayout.LayoutParams actionsLp = UiKit.matchWrapTopMargin(UiKit.dp(activity, 12));
+
+        Button cancelBtn = UiKit.textButton(activity, "取消");
+        actions.addView(cancelBtn);
+
+        Button okBtn = UiKit.filledButton(activity, "确定");
+        LinearLayout.LayoutParams okLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        okLp.leftMargin = UiKit.dp(activity, 8);
+        okBtn.setLayoutParams(okLp);
+        actions.addView(okBtn);
+        panel.addView(actions, actionsLp);
+
+        AlertDialog dialog = UiKit.showDialog(activity, panel);
+        cancelBtn.setOnClickListener(v -> {
+            dialog.dismiss();
+            if (listener != null) {
+                listener.onCancelled();
+            }
+        });
+        okBtn.setOnClickListener(v -> {
+            int count;
+            try {
+                count = Integer.parseInt(input.getText().toString().trim());
+            } catch (NumberFormatException e) {
+                Toast.makeText(activity, "请输入有效数字", Toast.LENGTH_SHORT).show();
+                if (listener != null) {
+                    listener.onCancelled();
+                }
+                return;
+            }
+            dialog.dismiss();
+            finish(activity, count, listener);
+        });
     }
 
     private static void finish(Activity activity, int count, Listener listener) {
@@ -155,15 +162,5 @@ public final class XimalayaBurstPicker {
 
     private static String formatPreset(int count) {
         return count + " 次（约 " + (count * 20) + " 分钟）";
-    }
-
-    private static LinearLayout.LayoutParams matchWrap() {
-        return new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
-
-    private static int dp(Activity activity, int value) {
-        return Math.round(value * activity.getResources().getDisplayMetrics().density);
     }
 }

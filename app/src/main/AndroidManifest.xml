@@ -13,9 +13,19 @@
         <package android:name="com.oumi.utility.media.hub" />
         <package android:name="com.omarea.vtools" />
         <package android:name="com.ximalaya.ting.android" />
+        <package android:name="com.mt.mtxx.mtxx" />
+        <package android:name="com.xs.fm" />
         <package android:name="com.dragon.read" />
         <package android:name="com.phoenix.read" />
         <package android:name="com.kylin.read" />
+        <package android:name="com.mountains.hills" />
+        <package android:name="com.abjlvcha.main" />
+        <package android:name="com.lvcha.main" />
+        <!-- Fallback: see all launcher apps (Android 11+ package visibility). -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application

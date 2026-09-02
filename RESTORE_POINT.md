@@ -2,11 +2,11 @@
 
 | Field | Value |
 |-------|-------|
-| Pinned at | 2026-09-02 09:22 |
+| Pinned at | 2026-09-02 15:44 |
 | Version | 3.9.93 |
 | Git tag | restore-point |
-| Previous commit | add3b70 |
-| Note | Lvcha UI strip + hooks (v3.9.93) |
+| Previous commit | e311291 |
+| Note | UI优化+安装检测修复+11应用列表(含红果) |
 
 ## Restore to this point
 
