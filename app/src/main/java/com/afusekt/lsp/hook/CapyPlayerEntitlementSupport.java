@@ -59,15 +59,10 @@ public final class CapyPlayerEntitlementSupport {
             return;
         }
         try {
-            // WebDAV restore can overwrite XML/pb with free after our first seed.
-            // Hooked SharedPreferences.getString always returns lifetime, so detect via files.
-            if (SP_SEEDED.get() && diskLooksLifetimePro(context)) {
-                seedDataStorePb(context);
+            seedDataStorePb(context);
+            if (SP_SEEDED.get()) {
                 return;
             }
-            SP_SEEDED.set(false);
-            PreferencesPbSeeder.markNeedsReseed();
-            seedDataStorePb(context);
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = prefs.edit();
             long now = System.currentTimeMillis();
@@ -91,54 +86,6 @@ public final class CapyPlayerEntitlementSupport {
             editor.commit();
             SP_SEEDED.set(true);
         } catch (Throwable ignored) {
-        }
-    }
-
-    /** File-level check — bypasses hooked SharedPreferences getters. */
-    public static boolean diskLooksLifetimePro(Context context) {
-        if (context == null) {
-            return false;
-        }
-        try {
-            java.io.File xml = new java.io.File(
-                    context.getApplicationInfo().dataDir + "/shared_prefs/" + PREFS_NAME + ".xml");
-            if (xmlExistsFree(xml)) {
-                return false;
-            }
-            java.io.File pb = new java.io.File(
-                    context.getFilesDir(), "datastore/" + PREFS_NAME + ".preferences_pb");
-            if (pb.exists()) {
-                return !PreferencesPbSeeder.needsReseedPublic(pb);
-            }
-            // No pb yet — XML must contain lifetime and no free tier blob.
-            return xml.exists() && !xmlExistsFree(xml) && xmlContainsLifetime(xml);
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    private static boolean xmlExistsFree(java.io.File xml) {
-        return fileContains(xml, "\"tier\":\"free\"") || fileContains(xml, "rejectedReceipt");
-    }
-
-    private static boolean xmlContainsLifetime(java.io.File xml) {
-        return fileContains(xml, "\"tier\":\"lifetime\"");
-    }
-
-    private static boolean fileContains(java.io.File file, String needle) {
-        if (file == null || !file.exists() || needle == null) {
-            return false;
-        }
-        try (java.io.FileInputStream in = new java.io.FileInputStream(file)) {
-            byte[] buf = new byte[(int) Math.min(file.length(), 512 * 1024L)];
-            int n = in.read(buf);
-            if (n <= 0) {
-                return false;
-            }
-            return new String(buf, 0, n, java.nio.charset.StandardCharsets.ISO_8859_1)
-                    .contains(needle);
-        } catch (Throwable t) {
-            return false;
         }
     }
 
@@ -214,7 +161,7 @@ public final class CapyPlayerEntitlementSupport {
     }
 
     public static boolean isDowngradeSubscriptionJson(String value) {
-        if (value == null || value.length() > 65536 || !value.trim().startsWith("{")) {
+        if (value == null || !value.trim().startsWith("{")) {
             return false;
         }
         String lower = value.toLowerCase(Locale.ROOT);

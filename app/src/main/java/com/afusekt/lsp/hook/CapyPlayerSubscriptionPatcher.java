@@ -57,10 +57,6 @@ public final class CapyPlayerSubscriptionPatcher {
         if (body == null || body.isEmpty()) {
             return body;
         }
-        // Never scan multi-MB WebDAV / backup payloads.
-        if (body.length() > 65536) {
-            return body;
-        }
         if (body.contains("\"rejectedReceipt\":true")) {
             body = body.replace("\"rejectedReceipt\":true", "\"rejectedReceipt\":null");
         }
@@ -92,10 +88,6 @@ public final class CapyPlayerSubscriptionPatcher {
         if (text == null || text.isEmpty()) {
             return false;
         }
-        // Backup / WebDAV bodies can be tens of MB — never toLowerCase them.
-        if (text.length() > 65536) {
-            return false;
-        }
         String lower = text.toLowerCase(Locale.ROOT);
         return lower.contains("hassubscription")
                 || lower.contains("subscription/status")
@@ -112,9 +104,6 @@ public final class CapyPlayerSubscriptionPatcher {
     }
 
     public static boolean isLifetimePayload(String text) {
-        if (text == null || text.length() > 65536) {
-            return false;
-        }
         String lower = text.toLowerCase(Locale.ROOT);
         return lower.contains("\"tier\":\"lifetime\"")
                 || lower.contains("\"tier\":\"life\"")
@@ -124,7 +113,7 @@ public final class CapyPlayerSubscriptionPatcher {
     }
 
     static boolean isDowngradePayload(String text) {
-        if (text == null || text.length() > 65536 || !text.trim().startsWith("{")) {
+        if (text == null || !text.trim().startsWith("{")) {
             return false;
         }
         String lower = text.toLowerCase(Locale.ROOT);

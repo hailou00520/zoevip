@@ -203,25 +203,22 @@ static int apply_capy115_bool_gate_scan(void) {
 
 static const char kCapy115BuildId[] = "7af013633a213bf5b934d1427a205d8a";
 
-/* CapyPlayer 1.1.6
- * WebDAV: allow cross-origin redirect WITHOUT forcing _sameOrigin true.
- * Forcing sameOrigin forwards Authorization onto CDN and can loop huge PUTs.
- *
- * Divert path (webdav_client_plus-style):
- *   bl _canRedirectTo-wrapper @ 0x82eb48
- *   tbz w0,#4 → non-follow   @ 0x82eb4c   ← must NOP (fall through = follow)
- *   follow via 0x10594e4
- * Wrapper @ 0x82f1ec: tbnz → false; NOP so redirect statuses always allow.
- * Do NOT patch Location isEmpty (0x82eab8): that early-exit is correct. */
+/* CapyPlayer 1.1.6 */
 static const PatchEntry kCapy116Patches[] = {
         {0x679648U, 0x372000a0U, 0xd503201fU, "PaywallGuard.ensureEntitled"},
         {0x67964cU, 0x9100c2c0U, 0x910082c0U, "PaywallGuard.ensureEntitled true"},
         {0x679818U, 0x372000a0U, 0xd503201fU, "PaywallGuard.ensureEntitledAsync"},
         {0x679b68U, 0x372000a0U, 0xd503201fU, "PaywallGuard.ensureProFeature"},
-        /* Redirect status → always allow (_canRedirectTo wrapper returns true). */
+        /* WebDAV 123pan: Location present but gate at 0x82eab8 returns early
+         * (skips follow) → 302 bubbles up as Refusing cross-origin. NOP it. */
+        {0x82eab8U, 0x37200ba0U, 0xd503201fU, "WebDAV Location gate allow follow"},
+        /* Allow cross-origin after _sameOrigin fails inside _canRedirectTo. */
         {0x82f1ecU, 0x372000a0U, 0xd503201fU, "WebDAV _canRedirectTo allow cross-origin"},
-        /* Fall through to follow path (was tbz-to-non-follow; old b#non-follow was inverted). */
-        {0x82eb4cU, 0x36200060U, 0xd503201fU, "WebDAV req follow redirect"},
+        /* Always take the follow-redirect path once status is a redirect. */
+        {0x82eb4cU, 0x36200060U, 0x14000003U, "WebDAV req follow redirect"},
+        /* Force _sameOrigin true so canRedirect/origin checks pass. */
+        {0x82eee4U, 0xa9bf79fdU, 0x910082c0U, "WebDAV _sameOrigin true"},
+        {0x82eee8U, 0xaa0f03fdU, 0xd65f03c0U, "WebDAV _sameOrigin ret"},
 };
 static const char kCapy116BuildId[] = "2d9bfe2e51bde16bc58c214ebb13ce5c";
 static const uint32_t kCapy116HostOff = 0xa496cU;
@@ -746,58 +743,25 @@ static int rewrite_host_utf16_at(uintptr_t addr, const char *from, const char *t
     return 1;
 }
 
-/* Avoid SIGSEGV on sparse/guard pages (backup JSON alloc creates many holes). */
-static int page_is_resident(uintptr_t addr, size_t page) {
-    unsigned char vec = 0;
-    uintptr_t base = addr & ~(uintptr_t) (page - 1);
-    if (mincore((void *) base, page, &vec) != 0) {
-        return 0;
-    }
-    return (vec & 1U) != 0;
-}
-
 static int scrub_subscription_host_region(uintptr_t start, uintptr_t end,
         const char *from, const char *to, size_t n) {
     if (end <= start + n) {
         return 0;
     }
-    long page_l = sysconf(_SC_PAGESIZE);
-    size_t page = page_l > 0 ? (size_t) page_l : 4096U;
+    size_t span = (size_t) (end - start);
     int rewritten = 0;
-    uintptr_t p = start & ~(uintptr_t) (page - 1);
-    for (; p < end; p += page) {
-        if (!page_is_resident(p, page)) {
-            continue;
+    for (size_t off = 0; off + n <= span; ) {
+        char *hit = memmem((void *) (start + off), span - off, from, n);
+        if (hit == NULL) {
+            break;
         }
-        uintptr_t seg_start = p < start ? start : p;
-        uintptr_t seg_end = p + page;
-        if (seg_end > end) {
-            seg_end = end;
+        if (rewrite_host_at((uintptr_t) hit, from, to, n)) {
+            rewritten++;
         }
-        if (n > 1U && p >= page && page_is_resident(p - page, page)) {
-            uintptr_t overlap = seg_start > (n - 1U) ? (seg_start - (n - 1U)) : start;
-            if (overlap >= start) {
-                seg_start = overlap;
-            }
-        }
-        if (seg_end <= seg_start + n) {
-            continue;
-        }
-        size_t span = (size_t) (seg_end - seg_start);
-        for (size_t off = 0; off + n <= span; ) {
-            char *hit = memmem((void *) (seg_start + off), span - off, from, n);
-            if (hit == NULL) {
-                break;
-            }
-            if (rewrite_host_at((uintptr_t) hit, from, to, n)) {
-                rewritten++;
-            }
-            off = (size_t) ((uintptr_t) hit - seg_start) + n;
-        }
+        off = (size_t) ((uintptr_t) hit - start) + n;
     }
-    /* UTF-16LE — only tiny regions, page-safe. */
-    size_t span_all = (size_t) (end - start);
-    if (span_all <= (4U << 20) && span_all > n * 2U) {
+    /* UTF-16LE heap copies — only on modest regions to avoid jank. */
+    if (span <= (8U << 20) && span > n * 2U) {
         uint8_t from16[128];
         if (n * 2U <= sizeof(from16)) {
             for (size_t i = 0; i < n; i++) {
@@ -805,39 +769,23 @@ static int scrub_subscription_host_region(uintptr_t start, uintptr_t end,
                 from16[i * 2U + 1U] = 0;
             }
             size_t n16 = n * 2U;
-            for (p = start & ~(uintptr_t) (page - 1); p < end; p += page) {
-                if (!page_is_resident(p, page)) {
-                    continue;
+            for (size_t off = 0; off + n16 <= span; ) {
+                char *hit = memmem((void *) (start + off), span - off, from16, n16);
+                if (hit == NULL) {
+                    break;
                 }
-                uintptr_t seg_start = p < start ? start : p;
-                uintptr_t seg_end = p + page;
-                if (seg_end > end) {
-                    seg_end = end;
+                if (rewrite_host_utf16_at((uintptr_t) hit, from, to, n)) {
+                    rewritten++;
                 }
-                if (seg_end <= seg_start + n16) {
-                    continue;
-                }
-                size_t span = (size_t) (seg_end - seg_start);
-                for (size_t off = 0; off + n16 <= span; ) {
-                    char *hit = memmem((void *) (seg_start + off), span - off, from16, n16);
-                    if (hit == NULL) {
-                        break;
-                    }
-                    if (rewrite_host_utf16_at((uintptr_t) hit, from, to, n)) {
-                        rewritten++;
-                    }
-                    off = (size_t) ((uintptr_t) hit - seg_start) + n16;
-                }
+                off = (size_t) ((uintptr_t) hit - start) + n16;
             }
         }
     }
     return rewritten;
 }
 
-/* libapp-only host rewrite. NEVER scan anonymous Dart heaps — that ANR/SEGVs
- * during WebDAV backup (RssHwm~2GB). Heap Uri copies are blocked via
- * libflutter getaddrinfo GOT filter instead. */
-static int scrub_subscription_host_libapp_only(void) {
+/* libapp rodata + Dart/native heaps: Uri may copy the host before divert lands. */
+static int scrub_subscription_host_everywhere(void) {
     static const char kFrom[] = "api-capyplayer.feifeiduck.cn";
     static const char kTo[] = "blocked.subscription.invalid";
     const size_t n = sizeof(kFrom) - 1U;
@@ -857,20 +805,61 @@ static int scrub_subscription_host_libapp_only(void) {
         if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR " %7s", &start, &end, perms) != 3) {
             continue;
         }
-        if (!line_has_libapp(line) || strchr(perms, 'r') == NULL || end <= start + n) {
+        if (strchr(perms, 'r') == NULL || end <= start + n) {
+            continue;
+        }
+        int is_libapp = line_has_libapp(line);
+        int writable = strchr(perms, 'w') != NULL;
+        if (!is_libapp && !writable) {
+            continue;
+        }
+        if (strstr(line, "[stack]") != NULL || strstr(line, "[vdso]") != NULL
+                || strstr(line, "[vvar]") != NULL || strstr(line, "kgsl") != NULL
+                || strstr(line, "mali") != NULL || strstr(line, "/system/") != NULL
+                || strstr(line, "/vendor/") != NULL || strstr(line, "/apex/") != NULL
+                || strstr(line, "dalvik") != NULL) {
             continue;
         }
         size_t span = (size_t) (end - start);
-        if (span > (64U << 20)) {
+        if (span > (32U << 20)) {
             continue;
         }
         rewritten += scrub_subscription_host_region(start, end, kFrom, kTo, n);
     }
     fclose(maps);
     if (rewritten > 0) {
-        LOGI("CapyPlayer: scrubbed host in libapp (%d site(s))", rewritten);
+        static time_t last_log;
+        time_t now = time(NULL);
+        if (last_log == 0 || now - last_log >= 5) {
+            LOGI("CapyPlayer: scrubbed subscription host (%d site(s))", rewritten);
+            last_log = now;
+        }
     }
     return rewritten;
+}
+
+static int g_host_scrub_thread_started = 0;
+static pthread_t g_host_scrub_thread;
+
+static void *host_scrub_thread(void *unused) {
+    (void) unused;
+    /* Keep killing heap copies while bootstrap / first sync runs. */
+    for (int i = 0; i < 20; i++) {
+        scrub_subscription_host_everywhere();
+        usleep(1000000);
+    }
+    return NULL;
+}
+
+static void start_host_scrub_thread(void) {
+    if (g_host_scrub_thread_started) {
+        return;
+    }
+    g_host_scrub_thread_started = 1;
+    if (pthread_create(&g_host_scrub_thread, NULL, host_scrub_thread, NULL) == 0) {
+        pthread_detach(g_host_scrub_thread);
+        LOGI("CapyPlayer: host heap scrub thread started");
+    }
 }
 
 static int divert_capy_subscription_host(uint32_t host_off) {
@@ -881,23 +870,25 @@ static int divert_capy_subscription_host(uint32_t host_off) {
     }
     const size_t n = sizeof(kFrom) - 1U;
     uintptr_t addr = 0;
-    if (g_capy115_host_diverted) {
-        return 1;
-    }
-    int ok = 0;
+    int ok = g_capy115_host_diverted;
     if (find_libapp_runtime_addr(host_off, &addr) == 0) {
         if (rewrite_host_at(addr, kFrom, kTo, n)) {
             ok = 1;
-            LOGI("CapyPlayer: diverted subscription API host at %p", (void *) addr);
-        } else {
+            if (!g_capy115_host_diverted) {
+                LOGI("CapyPlayer: diverted subscription API host at %p", (void *) addr);
+            }
+        } else if (!g_capy115_host_diverted) {
             LOGE("CapyPlayer: subscription host mismatch at %p", (void *) addr);
         }
-    } else {
+    } else if (!g_capy115_host_diverted) {
         LOGI("CapyPlayer: subscription host string not mapped yet (@0x%x)", host_off);
     }
-    (void) scrub_subscription_host_libapp_only();
+    if (scrub_subscription_host_everywhere() > 0) {
+        ok = 1;
+    }
     if (ok) {
         g_capy115_host_diverted = 1;
+        start_host_scrub_thread();
     }
     return ok;
 }
@@ -1060,7 +1051,7 @@ static int is_socket_fd(int fd) {
 }
 
 static int looks_like_subscription_payload(const char *buf, size_t len) {
-    if (buf == NULL || len < 16U || len > 65536U) {
+    if (buf == NULL || len < 16U) {
         return 0;
     }
     if (memmem(buf, len, "{", 1) == NULL) {
@@ -1172,15 +1163,11 @@ static ssize_t recv_subscription_hook(int fd, void *buf, size_t len, int flags) 
     return n;
 }
 
-static int ssl_read_subscription_hook(void *ssl, void *buf, int num);
-
-void capy_patch_subscription_inplace(char *buf, size_t len);
-
 static int ssl_read_subscription_hook(void *ssl, void *buf, int num) {
     int n = g_real_ssl_read(ssl, buf, num);
-    if (n > 0 && n <= 65536 && buf != NULL) {
-        /* Same-length inplace only — never change returned byte count. */
-        capy_patch_subscription_inplace((char *) buf, (size_t) n);
+    if (n > 0 && buf != NULL) {
+        size_t patched = patch_subscription_buffer((char *) buf, (size_t) n);
+        return (int) patched;
     }
     return n;
 }
@@ -1408,13 +1395,29 @@ static int looks_like_webdav_or_binary(const char *buf, size_t len) {
 }
 
 void capy_patch_subscription_inplace(char *buf, size_t len) {
-    if (buf == NULL || len < 8U || len > 65536U) {
+    if (buf == NULL || len < 8U) {
         return;
     }
     if (looks_like_webdav_or_binary(buf, len)) {
         return;
     }
     rewrite_rejected_receipt(buf, len);
+    if (memmem(buf, len, "{", 1) != NULL && len >= 24U && len < 8192U) {
+        static int json_logs;
+        if (json_logs < 8) {
+            char preview[96];
+            size_t n = len < 90U ? len : 90U;
+            memcpy(preview, buf, n);
+            preview[n] = '\0';
+            for (size_t i = 0; i < n; i++) {
+                if ((unsigned char) preview[i] < 0x20U || (unsigned char) preview[i] > 0x7eU) {
+                    preview[i] = '.';
+                }
+            }
+            LOGI("CapyPlayer: tls json peek (%zu): %s", len, preview);
+            json_logs++;
+        }
+    }
     if (!looks_like_subscription_payload(buf, len)) {
         return;
     }
@@ -1578,18 +1581,19 @@ static ssize_t flutter_libc_read_hook_c(int fd, void *buf, size_t count) {
         return -1;
     }
     ssize_t n = real(fd, buf, count);
-    /* Only small socket reads — never scan multi-MB WebDAV backup chunks. */
-    if (n > 0 && n <= 65536 && buf != NULL && is_socket_fd(fd)) {
+    if (n > 0 && buf != NULL) {
         capy_patch_subscription_inplace((char *) buf, (size_t) n);
     }
     return n;
 }
 
 static ssize_t flutter_libc_write_hook_c(int fd, const void *buf, size_t count) {
-    /* Do not rewrite outbound bodies — WebDAV PUT backup must pass untouched.
-       Subscription free→lifetime is handled on the read path only. */
-    (void) buf;
-    (void) count;
+    if (buf != NULL && count > 0U && count < 65536U
+            && !looks_like_webdav_or_binary((const char *) buf, count)) {
+        capy_patch_http_request_inplace((char *) buf, count);
+        /* Rewrite free→lifetime only on JSON subscription blobs, never WebDAV. */
+        capy_patch_subscription_inplace((char *) buf, count);
+    }
     libc_write_fn real = (libc_write_fn) g_libflutter_write_plt;
     if (real == NULL) {
         return -1;
@@ -1686,19 +1690,19 @@ static int patch_subscription_paths_once(void) {
 }
 
 static int g_getaddrinfo_hook_installed = 0;
+static uint32_t g_saved_getaddrinfo[4];
+static void *g_getaddrinfo_trampoline = NULL;
 typedef int (*getaddrinfo_fn)(const char *, const char *, const struct addrinfo *,
         struct addrinfo **);
 static getaddrinfo_fn g_real_getaddrinfo = NULL;
-
-/* libflutter .got.plt JUMP_SLOT for getaddrinfo (Capy 1.1.6 libflutter). */
-static const uint32_t kFlutterGetaddrinfoGotOff = 0xb41c88U;
 
 static int should_block_subscription_host(const char *node) {
     if (node == NULL || node[0] == '\0') {
         return 0;
     }
-    return strstr(node, "api-capyplayer.feifeiduck.cn") != NULL
-            || strstr(node, "blocked.subscription.invalid") != NULL;
+    /* Block only the subscription API host so sync fetch fails and local lifetime is kept.
+       Do not block recommend/subtitle/CDN hosts under feifeiduck. */
+    return strstr(node, "api-capyplayer.feifeiduck.cn") != NULL;
 }
 
 static int getaddrinfo_subscription_block(const char *node, const char *service,
@@ -1710,101 +1714,41 @@ static int getaddrinfo_subscription_block(const char *node, const char *service,
         }
         return EAI_NONAME;
     }
-    if (g_real_getaddrinfo == NULL) {
-        return EAI_FAIL;
-    }
     return g_real_getaddrinfo(node, service, hints, res);
 }
 
-static int find_libflutter_base(uintptr_t *base_out) {
-    FILE *maps = open_proc_maps();
-    if (maps == NULL) {
-        return -1;
-    }
-    char line[1024];
-    uintptr_t min_base = 0;
-    int found = 0;
-    while (fgets(line, sizeof(line), maps) != NULL) {
-        if (!line_has_libflutter(line)) {
-            continue;
-        }
-        uintptr_t start = 0;
-        if (sscanf(line, "%" SCNxPTR "-", &start) != 1) {
-            continue;
-        }
-        if (!found || start < min_base) {
-            min_base = start;
-            found = 1;
-        }
-    }
-    fclose(maps);
-    if (!found) {
-        return -1;
-    }
-    *base_out = min_base;
-    return 0;
-}
-
-/* Patch libflutter GOT only — does not rewrite libc (WebDAV DNS stays intact). */
-static int install_flutter_getaddrinfo_got_once(void) {
+static int install_getaddrinfo_block_once(void) {
     if (g_getaddrinfo_hook_installed) {
         return 1;
     }
-    uintptr_t base = 0;
-    if (find_libflutter_base(&base) != 0) {
+    void *target = dlsym(RTLD_DEFAULT, "getaddrinfo");
+    if (target == NULL) {
+        LOGI("CapyPlayer: getaddrinfo not found");
         return 0;
     }
-    uintptr_t got = base + (uintptr_t) kFlutterGetaddrinfoGotOff;
-    long page = sysconf(_SC_PAGESIZE);
-    if (page <= 0) {
-        page = 4096;
-    }
-    uintptr_t page_base = got & ~(uintptr_t) (page - 1);
-    if (mprotect((void *) page_base, (size_t) page * 2U, PROT_READ | PROT_WRITE) != 0) {
-        LOGE("CapyPlayer: getaddrinfo GOT mprotect failed: %s", strerror(errno));
+    if (!install_arm64_trampoline_hook(target, (void *) getaddrinfo_subscription_block,
+            &g_getaddrinfo_trampoline, g_saved_getaddrinfo, (void **) &g_real_getaddrinfo)) {
+        LOGE("CapyPlayer: getaddrinfo hook install failed");
         return 0;
     }
-    getaddrinfo_fn *slot = (getaddrinfo_fn *) got;
-    getaddrinfo_fn current = *slot;
-    if (current == NULL || current == (getaddrinfo_fn) getaddrinfo_subscription_block) {
-        current = (getaddrinfo_fn) dlsym(RTLD_DEFAULT, "getaddrinfo");
-    }
-    if (current == NULL) {
-        LOGE("CapyPlayer: real getaddrinfo unresolved");
-        mprotect((void *) page_base, (size_t) page * 2U, PROT_READ);
-        return 0;
-    }
-    g_real_getaddrinfo = current;
-    *slot = getaddrinfo_subscription_block;
-    __builtin___clear_cache((char *) slot, (char *) slot + sizeof(*slot));
-    mprotect((void *) page_base, (size_t) page * 2U, PROT_READ);
     g_getaddrinfo_hook_installed = 1;
-    LOGI("CapyPlayer: libflutter getaddrinfo GOT filtered at %p (real %p)",
-            (void *) got, (void *) current);
+    LOGI("CapyPlayer: getaddrinfo block installed at %p", target);
     return 1;
 }
 
 static int install_capy_network_hooks(void) {
-    /* Pro without heap scrub / without per-chunk body scans:
-     *  - libflutter getaddrinfo GOT blocks only subscription host (WebDAV OK)
-     *  - Paywall + libapp host divert elsewhere
-     * Flutter read@plt / stream hooks disabled: they memmem every WebDAV chunk
-     * and ANR during multi-GB backup. */
-    int installed = 0;
-    if (install_flutter_getaddrinfo_got_once()) {
-        installed++;
-    }
+    /* No libc getaddrinfo trampoline: rewriting getaddrinfo prologue breaks
+     * PC-relative instructions and can fail ALL DNS (WebDAV 123pan included).
+     * No libflutter read/write hooks either (corrupted WebDAV bodies).
+     * Pro unlock relies on Paywall patches + subscription host divert only. */
     (void) install_ssl_read_hook_once;
     (void) install_flutter_read_hook_once;
     (void) install_flutter_io_hooks_once;
+    (void) install_getaddrinfo_block_once;
     (void) patch_subscription_paths_once;
     (void) capy_patch_http_request_inplace;
-    if (installed > 0) {
-        LOGI("CapyPlayer: DNS filter ready (%d) — Pro+WebDAV-safe", installed);
-    } else {
-        LOGI("CapyPlayer: DNS filter pending (libflutter not mapped)");
-    }
-    return installed > 0 ? 1 : 0;
+    LOGI("CapyPlayer: network hooks skipped (Paywall+host divert only; WebDAV-safe)");
+    return 1;
 }
 
 JNIEXPORT void JNICALL

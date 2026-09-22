@@ -11,8 +11,8 @@ android {
         applicationId = "com.zoevip.lsp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 315
-        versionName = "3.9.149"
+        versionCode = 303
+        versionName = "3.9.137"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

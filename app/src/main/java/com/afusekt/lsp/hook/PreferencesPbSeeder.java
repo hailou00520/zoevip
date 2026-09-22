@@ -79,10 +79,6 @@ final class PreferencesPbSeeder {
         }
     }
 
-    static boolean needsReseedPublic(File target) {
-        return needsReseed(target);
-    }
-
     private static boolean needsReseed(File target) {
         if (target == null || !target.exists()) {
             return true;

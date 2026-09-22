@@ -2,13 +2,10 @@ package com.afusekt.lsp.libxposed;
 
 import android.app.Activity;
 import android.app.Application;
-import android.content.ComponentCallbacks2;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.util.Log;
 
 import com.afusekt.lsp.ZoeIds;
@@ -18,7 +15,6 @@ import com.afusekt.lsp.hook.CapyPlayerSubscriptionPatcher;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.lang.ref.WeakReference;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
@@ -32,7 +28,6 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 import io.github.libxposed.api.XposedInterface;
 
@@ -48,14 +43,6 @@ public final class LibCapyPlayerJavaHooks {
             CapyPlayerEntitlementSupport.SUBSCRIPTION_STATE_JSON;
 
     private static final AtomicBoolean INSTALLED = new AtomicBoolean(false);
-    private static final AtomicBoolean MDK_TRIM_SCHEDULED = new AtomicBoolean(false);
-    private static final AtomicBoolean TRIM_CALLBACK_REGISTERED = new AtomicBoolean(false);
-    private static final AtomicBoolean BACKUP_IO_HOOKED = new AtomicBoolean(false);
-    /** Video disk cache mmap'd into RSS (~2GB) makes createBackupBytes OOM. */
-    private static final long MDK_CACHE_TRIM_BYTES = 512L * 1024L * 1024L;
-    private static final long IMAGE_CACHE_TRIM_BYTES = 16L * 1024L * 1024L;
-    private static final AtomicLong LAST_MEMORY_RELEASE_ELAPSED = new AtomicLong(0L);
-    private static volatile WeakReference<Object> flutterJniRef = new WeakReference<>(null);
     private static final AtomicBoolean DATASTORE_HOOKED = new AtomicBoolean(false);
     private static final AtomicBoolean DATASTORE_GAVE_UP = new AtomicBoolean(false);
     private static final AtomicBoolean JAVA_STORAGE_HOOKED = new AtomicBoolean(false);
@@ -95,15 +82,12 @@ public final class LibCapyPlayerJavaHooks {
         installSubscriptionDnsBlock(module, mode);
         // ClassLoader.loadClass global hook removed: it stalled Flutter first-frame (white screen).
         maybeHookFlutterJni(module, cl, mode);
-        installBackupMemoryGuard(module, mode);
-        // Only tracks FlutterSharedPreferences.preferences_pb paths (not every write).
-        installPbWriteGuard(module, mode);
+        // preferences_pb FileOutputStream write hooks removed: hooked every process write.
         installMainActivityHooks(module, cl, mode);
         LibCapyPlayerPurchaseHooks.install(module, cl);
         installDeferredHooks(module, cl);
         // BillingClient PurchasesResponseListener absent in this APK (Pigeon IAP only).
         startPolling(module, cl);
-        startMemoryWatchdog();
         refreshContextAndSeed(module);
         LibCapyPlayerNative.applyWhenReady(module);
         LibCapyPlayerNative.startPatchRetry(module);
@@ -115,7 +99,7 @@ public final class LibCapyPlayerJavaHooks {
         if (context != null) {
             appContext = context;
             CapyPlayerEntitlementSupport.seedProSubscription(context);
-            // Avoid forceReseed here — rebuilds Flutter widgets and refills ImageCache (~2GB RSS).
+            // One delayed reseed only — repeated SP writes rebuild Flutter and flash images.
             scheduleEntitlementPush(context, 1);
             String msg = "seeded entitlement via " + context.getClass().getSimpleName();
             module.log(4, TAG, msg);
@@ -166,16 +150,6 @@ public final class LibCapyPlayerJavaHooks {
                 }
                 return chain.proceed();
             });
-            Method getByName = InetAddress.class.getDeclaredMethod("getByName", String.class);
-            hookMethod(module, getByName, mode, chain -> {
-                String host = stringArg(chain, 0);
-                if (host != null && (host.contains("api-capyplayer.feifeiduck.cn")
-                        || host.contains("blocked.subscription.invalid"))) {
-                    log(4, "blocked subscription DNS(getByName) " + host);
-                    throw new java.net.UnknownHostException(host);
-                }
-                return chain.proceed();
-            });
             module.log(4, TAG, "subscription DNS block hooked");
         } catch (Throwable t) {
             module.log(5, TAG, "subscription DNS block skipped: " + t.getMessage());
@@ -216,300 +190,6 @@ public final class LibCapyPlayerJavaHooks {
         CapyPlayerEntitlementSupport.seedProSubscription(context);
         scheduleEntitlementPush(context, 1);
         LibCapyPlayerNative.applyWhenReady(module);
-        scheduleMdkCacheTrim(context);
-        registerTrimMemoryCallback(context);
-        // Soft trim shortly after launch so ImageCache does not sit at multi-GB.
-        new Handler(Looper.getMainLooper()).postDelayed(
-                () -> releaseMemoryForBackup(context, false), 2500L);
-    }
-
-    /**
-     * Ask Flutter to drop ImageCache / Skia bitmaps, then trim on-disk video/image caches.
-     * createBackupBytes is tiny (~0.1–0.6MB) but OOMs when RSS already ~2GB from posters/player.
-     */
-    private static void releaseMemoryForBackup(Context context, boolean aggressiveDisk) {
-        long now = SystemClock.elapsedRealtime();
-        long prev = LAST_MEMORY_RELEASE_ELAPSED.get();
-        long rssNow = readRssAnonKb();
-        long minGap = (aggressiveDisk || rssNow >= 1_200_000L) ? 5_000L : 15_000L;
-        if (now - prev < minGap) {
-            return;
-        }
-        if (!LAST_MEMORY_RELEASE_ELAPSED.compareAndSet(prev, now)) {
-            return;
-        }
-        try {
-            Object jni = flutterJniRef != null ? flutterJniRef.get() : null;
-            if (jni != null) {
-                try {
-                    Method notify = jni.getClass().getMethod("notifyLowMemoryWarning");
-                    notify.invoke(jni);
-                    log(4, "FlutterJNI.notifyLowMemoryWarning");
-                } catch (NoSuchMethodException ignored) {
-                    // Older embeddings — fall through to Application callbacks.
-                }
-            }
-            Context appCtx = context != null ? context.getApplicationContext() : resolveAppContext();
-            if (appCtx instanceof Application application) {
-                application.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
-                application.onLowMemory();
-            }
-            if (aggressiveDisk && appCtx != null) {
-                MDK_TRIM_SCHEDULED.set(false);
-                scheduleMdkCacheTrim(appCtx);
-                trimImageDiskCaches(appCtx);
-            }
-            Runtime.getRuntime().gc();
-            log(4, "released memory ahead of backup/WebDAV rssAnonKb=" + readRssAnonKb());
-            Log.i(ZoeIds.TAG, "CapyJava released memory rssAnonKb=" + readRssAnonKb());
-        } catch (Throwable t) {
-            log(5, "memory release failed: " + t.getMessage());
-            Log.e(ZoeIds.TAG, "CapyJava memory release failed", t);
-        }
-    }
-
-    /** Anonymous RSS in KB; createBackup OOMs around ~2_000_000. */
-    private static long readRssAnonKb() {
-        try {
-            java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/self/status"));
-            try {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (line.startsWith("RssAnon:")) {
-                        String[] parts = line.split("\\s+");
-                        if (parts.length >= 2) {
-                            return Long.parseLong(parts[1]);
-                        }
-                    }
-                }
-            } finally {
-                reader.close();
-            }
-        } catch (Throwable ignored) {
-        }
-        return -1L;
-    }
-
-    private static void maybeReleaseIfRssHigh(Context context) {
-        long rss = readRssAnonKb();
-        // ~700MB anon already unsafe for createBackupBytes on this device.
-        if (rss >= 700_000L) {
-            log(4, "high RssAnonKb=" + rss + " — preemptive memory release");
-            Log.i(ZoeIds.TAG, "CapyJava high RssAnonKb=" + rss);
-            releaseMemoryForBackup(context, true);
-        }
-    }
-
-    private static void trimImageDiskCaches(Context context) {
-        new Thread(() -> {
-            try {
-                File cache = context.getCacheDir();
-                if (cache == null) {
-                    return;
-                }
-                String[] names = {
-                        "cached_network_image_ce", "image_cache", "tmdb_image_cache", "mdk"
-                };
-                long freed = 0L;
-                for (String name : names) {
-                    File dir = new File(cache, name);
-                    if (!dir.isDirectory()) {
-                        continue;
-                    }
-                    long size = directorySize(dir);
-                    if (size < IMAGE_CACHE_TRIM_BYTES && !"mdk".equals(name)) {
-                        continue;
-                    }
-                    if ("mdk".equals(name) && size < MDK_CACHE_TRIM_BYTES) {
-                        continue;
-                    }
-                    freed += deleteRecursively(dir);
-                }
-                if (freed > 0L) {
-                    log(4, "trimmed image/mdk disk caches freed≈"
-                            + (freed / (1024 * 1024)) + "MB");
-                }
-            } catch (Throwable t) {
-                log(5, "image cache trim failed: " + t.getMessage());
-            }
-        }, "zoevip-img-trim").start();
-    }
-
-    private static void installBackupMemoryGuard(
-            ZoeModule module, XposedInterface.ExceptionMode mode
-    ) {
-        if (!BACKUP_IO_HOOKED.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            for (Constructor<?> ctor : FileOutputStream.class.getDeclaredConstructors()) {
-                Class<?>[] params = ctor.getParameterTypes();
-                if (params.length >= 1 && params[0] == File.class) {
-                    hookConstructor(module, ctor, mode, chain -> {
-                        Object fileArg = chain.getArg(0);
-                        if (fileArg instanceof File file) {
-                            String path = file.getAbsolutePath();
-                            if (isBackupRelatedPath(path)) {
-                                releaseMemoryForBackup(resolveAppContext(), true);
-                                schedulePostBackupProReseed();
-                            } else if (isPrefsRestorePath(path)) {
-                                schedulePostBackupProReseed();
-                            }
-                        }
-                        return chain.proceed();
-                    });
-                } else if (params.length >= 1 && params[0] == String.class) {
-                    hookConstructor(module, ctor, mode, chain -> {
-                        Object pathArg = chain.getArg(0);
-                        if (pathArg instanceof String path) {
-                            if (isBackupRelatedPath(path)) {
-                                releaseMemoryForBackup(resolveAppContext(), true);
-                                schedulePostBackupProReseed();
-                            } else if (isPrefsRestorePath(path)) {
-                                schedulePostBackupProReseed();
-                            }
-                        }
-                        return chain.proceed();
-                    });
-                }
-            }
-            module.log(4, TAG, "backup memory guard installed");
-        } catch (Throwable t) {
-            BACKUP_IO_HOOKED.set(false);
-            module.log(5, TAG, "backup memory guard skipped: " + t.getMessage());
-        }
-    }
-
-    private static boolean isBackupRelatedPath(String path) {
-        if (path == null) {
-            return false;
-        }
-        String lower = path.toLowerCase(Locale.ROOT);
-        return lower.contains("capyplayer_backup")
-                || lower.contains("sync_logs")
-                || lower.contains("file_picker")
-                || lower.contains("webdav")
-                || lower.endsWith("backup.json")
-                || lower.contains("/backup");
-    }
-
-    private static boolean isPrefsRestorePath(String path) {
-        if (path == null) {
-            return false;
-        }
-        String lower = path.toLowerCase(Locale.ROOT);
-        return lower.contains("fluttersharedpreferences")
-                || lower.endsWith("preferences_pb")
-                || lower.endsWith("preferences_pb.tmp");
-    }
-
-    private static final AtomicBoolean POST_BACKUP_RESEED_SCHEDULED = new AtomicBoolean(false);
-
-    /** Pull/restore can dump free tier into XML/pb; reseed once after IO settles. */
-    private static void schedulePostBackupProReseed() {
-        if (!POST_BACKUP_RESEED_SCHEDULED.compareAndSet(false, true)) {
-            return;
-        }
-        Handler handler = new Handler(Looper.getMainLooper());
-        handler.postDelayed(() -> {
-            try {
-                Context ctx = resolveAppContext();
-                if (ctx != null && !CapyPlayerEntitlementSupport.diskLooksLifetimePro(ctx)) {
-                    CapyPlayerEntitlementSupport.forceReseedProSubscription(ctx);
-                    log(4, "post-backup/restore Pro reseed");
-                }
-            } finally {
-                POST_BACKUP_RESEED_SCHEDULED.set(false);
-            }
-        }, 2500L);
-    }
-
-    private static void registerTrimMemoryCallback(Context context) {
-        if (!(context instanceof Application application)
-                || !TRIM_CALLBACK_REGISTERED.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            application.registerComponentCallbacks(new ComponentCallbacks2() {
-                @Override
-                public void onTrimMemory(int level) {
-                    if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-                        MDK_TRIM_SCHEDULED.set(false);
-                        scheduleMdkCacheTrim(application);
-                    }
-                }
-
-                @Override
-                public void onConfigurationChanged(Configuration newConfig) {
-                }
-
-                @Override
-                public void onLowMemory() {
-                    MDK_TRIM_SCHEDULED.set(false);
-                    scheduleMdkCacheTrim(application);
-                }
-            });
-        } catch (Throwable t) {
-            log(5, "trim callback skipped: " + t.getMessage());
-        }
-    }
-
-    private static void scheduleMdkCacheTrim(Context context) {
-        if (context == null || !MDK_TRIM_SCHEDULED.compareAndSet(false, true)) {
-            return;
-        }
-        final Context app = context.getApplicationContext();
-        new Thread(() -> {
-            try {
-                File mdk = new File(app.getCacheDir(), "mdk");
-                if (!mdk.isDirectory()) {
-                    return;
-                }
-                long size = directorySize(mdk);
-                if (size < MDK_CACHE_TRIM_BYTES) {
-                    return;
-                }
-                long freed = deleteRecursively(mdk);
-                log(4, "trimmed mdk cache was=" + (size / (1024 * 1024))
-                        + "MB freed≈" + (freed / (1024 * 1024)) + "MB (backup OOM guard)");
-            } catch (Throwable t) {
-                log(5, "mdk trim failed: " + t.getMessage());
-            }
-        }, "zoevip-mdk-trim").start();
-    }
-
-    private static long directorySize(File dir) {
-        long total = 0L;
-        File[] children = dir.listFiles();
-        if (children == null) {
-            return 0L;
-        }
-        for (File child : children) {
-            if (child.isFile()) {
-                total += Math.max(0L, child.length());
-            } else if (child.isDirectory()) {
-                total += directorySize(child);
-            }
-        }
-        return total;
-    }
-
-    private static long deleteRecursively(File file) {
-        long freed = 0L;
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    freed += deleteRecursively(child);
-                }
-            }
-        }
-        long len = file.isFile() ? Math.max(0L, file.length()) : 0L;
-        if (file.delete()) {
-            freed += len;
-        }
-        return freed;
     }
 
     private static void scheduleEntitlementPush(final Context context, int times) {
@@ -520,7 +200,6 @@ public final class LibCapyPlayerJavaHooks {
         for (int i = 0; i < times; i++) {
             final int attempt = i;
             handler.postDelayed(() -> {
-                // seedPro only — forceReseed rebuilds Flutter and refills ImageCache → backup OOM.
                 CapyPlayerEntitlementSupport.seedProSubscription(context);
                 log(4, "scheduled entitlement push (" + (attempt + 1) + "/" + times + ")");
             }, 800L + attempt * 2200L);
@@ -662,10 +341,6 @@ public final class LibCapyPlayerJavaHooks {
                 return;
             }
             hookMethod(module, target, mode, chain -> {
-                Object self = chain.getThisObject();
-                if (self != null) {
-                    flutterJniRef = new WeakReference<>(self);
-                }
                 List<Object> args = chain.getArgs();
                 ByteBuffer message = null;
                 int position = 0;
@@ -686,19 +361,6 @@ public final class LibCapyPlayerJavaHooks {
                 }
                 return chain.proceed();
             });
-            // Capture JNI instance early via attachToNative if present.
-            try {
-                Method attachNative = flutterJni.getDeclaredMethod("attachToNative");
-                hookMethod(module, attachNative, mode, chain -> {
-                    Object result = chain.proceed();
-                    Object self = chain.getThisObject();
-                    if (self != null) {
-                        flutterJniRef = new WeakReference<>(self);
-                    }
-                    return result;
-                });
-            } catch (NoSuchMethodException ignored) {
-            }
             module.log(4, TAG, "FlutterJNI hooked");
         } catch (Throwable t) {
             FLUTTER_JNI_HOOKED.set(false);
@@ -1135,10 +797,6 @@ public final class LibCapyPlayerJavaHooks {
                 hookMethod(module, stringMethod, mode, chain -> {
                     Object result = chain.proceed();
                     if (result instanceof String text) {
-                        // Skip large bodies (WebDAV backup JSON) — toLowerCase OOMs.
-                        if (text.length() > 65536) {
-                            return result;
-                        }
                         String patched = CapyPlayerEntitlementSupport.patchHttpText(text);
                         if (!patched.equals(text)) {
                             log(4, "replaced OkHttp subscription body");
@@ -1310,49 +968,8 @@ public final class LibCapyPlayerJavaHooks {
 
     private static boolean containsPbDowngrade(byte[] payload) {
         String lower = new String(payload, StandardCharsets.ISO_8859_1).toLowerCase(Locale.ROOT);
-        if (lower.contains("\"tier\":\"free\"") || lower.contains("rejectedreceipt")) {
-            return true;
-        }
         return lower.contains("hassubscription")
                 && (lower.contains(":false") || lower.contains("\"tier\":\"free\""));
-    }
-
-    private static void captureFlutterJniFromEngine(Object engine) {
-        if (engine == null) {
-            return;
-        }
-        try {
-            Method getter = null;
-            for (Method method : engine.getClass().getMethods()) {
-                if ("getFlutterJNI".equals(method.getName())
-                        && method.getParameterCount() == 0) {
-                    getter = method;
-                    break;
-                }
-            }
-            if (getter != null) {
-                Object jni = getter.invoke(engine);
-                if (jni != null) {
-                    flutterJniRef = new WeakReference<>(jni);
-                    log(4, "captured FlutterJNI from engine");
-                    return;
-                }
-            }
-            for (java.lang.reflect.Field field : engine.getClass().getDeclaredFields()) {
-                if (!field.getType().getName().contains("FlutterJNI")) {
-                    continue;
-                }
-                field.setAccessible(true);
-                Object jni = field.get(engine);
-                if (jni != null) {
-                    flutterJniRef = new WeakReference<>(jni);
-                    log(4, "captured FlutterJNI field " + field.getName());
-                    return;
-                }
-            }
-        } catch (Throwable t) {
-            log(5, "FlutterJNI capture skipped: " + t.getMessage());
-        }
     }
 
     private static void installMainActivityHooks(
@@ -1366,9 +983,8 @@ public final class LibCapyPlayerJavaHooks {
                 hookMethod(module, onCreate, mode, chain -> {
                     Object result = chain.proceed();
                     if (chain.getThisObject() instanceof Activity activity) {
-                        Context app = activity.getApplicationContext();
-                        CapyPlayerEntitlementSupport.seedProSubscription(app);
-                        releaseMemoryForBackup(app, false);
+                        CapyPlayerEntitlementSupport.seedProSubscription(
+                                activity.getApplicationContext());
                         installDeferredHooks(module, cl);
                     }
                     return result;
@@ -1382,7 +998,6 @@ public final class LibCapyPlayerJavaHooks {
                 if (configure != null) {
                     hookMethod(module, configure, mode, chain -> {
                         Object result = chain.proceed();
-                        captureFlutterJniFromEngine(chain.getArg(0));
                         log(4, "FlutterEngine ready");
                         installDeferredHooks(module, cl);
                         return result;
@@ -1394,26 +1009,6 @@ public final class LibCapyPlayerJavaHooks {
         } catch (Throwable t) {
             module.log(5, TAG, "MainActivity hook skipped: " + t.getMessage());
         }
-    }
-
-    private static final AtomicBoolean MEMORY_WATCH_STARTED = new AtomicBoolean(false);
-
-    private static void startMemoryWatchdog() {
-        if (!MEMORY_WATCH_STARTED.compareAndSet(false, true)) {
-            return;
-        }
-        Handler handler = new Handler(Looper.getMainLooper());
-        Runnable task = new Runnable() {
-            @Override
-            public void run() {
-                Context ctx = resolveAppContext();
-                if (ctx != null) {
-                    maybeReleaseIfRssHigh(ctx);
-                }
-                handler.postDelayed(this, 20_000L);
-            }
-        };
-        handler.postDelayed(task, 3_000L);
     }
 
     private static void startPolling(ZoeModule module, ClassLoader cl) {
@@ -1438,14 +1033,13 @@ public final class LibCapyPlayerJavaHooks {
                 }
                 Context ctx = resolveAppContext();
                 if (ctx != null && (attempts % 8) == 0) {
-                    // seedPro rewrites only when disk shows free (WebDAV restore / sync).
+                    // Only re-overlay if storage was previously marked dirty.
                     CapyPlayerEntitlementSupport.seedProSubscription(ctx);
-                    maybeReleaseIfRssHigh(ctx);
                 }
                 boolean storageReady = SP_BACKEND_HOOKED.get() || I95_READ_HOOKED.get();
                 boolean patchesReady = LibCapyPlayerNative.isPatched();
-                if (++attempts < (storageReady && patchesReady ? 4 : 12)) {
-                    handler.postDelayed(this, storageReady ? 2000L : 800L);
+                if (++attempts < (storageReady && patchesReady ? 6 : 24)) {
+                    handler.postDelayed(this, storageReady ? 1500L : 600L);
                 }
             }
         };

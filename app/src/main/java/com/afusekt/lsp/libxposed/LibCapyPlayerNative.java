@@ -12,8 +12,8 @@ final class LibCapyPlayerNative {
 
     private static final String TAG = ZoeIds.TAG + ":CapyNative";
     /** CapyPlayer 1.1.5 fixed patch table size in libzoevippatch. */
-    /** Capy 1.1.6 fixed table size (Paywall×4 + WebDAV×2). */
-    private static final int CAPY115_PATCH_COUNT = 6;
+    /** Prefer 1.1.6 (4) or 1.1.5 (23) fixed tables. */
+    private static final int CAPY115_PATCH_COUNT = 4;
     private static final AtomicBoolean LIB_LOADED = new AtomicBoolean(false);
     private static final AtomicBoolean PATCHED = new AtomicBoolean(false);
     private static final AtomicBoolean LOAD_LIBRARY_HOOKED = new AtomicBoolean(false);
