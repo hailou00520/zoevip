@@ -21,6 +21,7 @@
         <package android:name="com.mountains.hills" />
         <package android:name="com.abjlvcha.main" />
         <package android:name="com.lvcha.main" />
+        <package android:name="com.hush.yamby" />
         <!-- Fallback: see all launcher apps (Android 11+ package visibility). -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

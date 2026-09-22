@@ -53,24 +53,10 @@ public final class CapyPlayerHooks {
     private static Context appContext;
 
     private static final String SUBSCRIPTION_STATE_JSON =
-            "{\"hasSubscription\":true,\"has_subscription\":true,"
-                    + "\"has_active_subscription\":true,\"isActive\":true,\"isPro\":true,"
-                    + "\"lifetime\":true,\"lifetimeMember\":true,\"tier\":\"lifetime\","
-                    + "\"status\":\"active\",\"plan\":\"lifetime\",\"planType\":\"lifetime\","
-                    + "\"productId\":\"" + PRO_PRODUCT + "\","
-                    + "\"product_id\":\"" + PRO_PRODUCT + "\","
-                    + "\"google_product_id\":\"" + PRO_PRODUCT + "\","
-                    + "\"googlePlay\":true,\"source\":\"local\",\"synced\":true,"
-                    + "\"expiresAt\":null,\"expires_at\":null}";
+            CapyPlayerSubscriptionPatcher.LIFETIME_STATE_JSON;
 
     private static final String SUBSCRIPTION_STATUS_JSON =
-            "{\"hasSubscription\":true,\"has_subscription\":true,"
-                    + "\"has_active_subscription\":true,\"isActive\":true,\"isPro\":true,"
-                    + "\"subscription\":{\"tier\":\"lifetime\",\"status\":\"active\","
-                    + "\"plan\":\"lifetime\",\"productId\":\"" + PRO_PRODUCT + "\","
-                    + "\"product_id\":\"" + PRO_PRODUCT + "\","
-                    + "\"isActive\":true,\"lifetime\":true,"
-                    + "\"expiresAt\":null,\"expires_at\":null}}";
+            CapyPlayerSubscriptionPatcher.LIFETIME_API_JSON;
 
     private CapyPlayerHooks() {
     }
@@ -85,6 +71,7 @@ public final class CapyPlayerHooks {
         hookFlutterJni(cl);
         hookDeferredClassLoad(cl);
         PreferencesPbWriteGuard.install();
+        CapyPlayerNetworkHooks.install(cl);
         CapyPlayerPurchaseHooks.install(cl);
         CapyPlayerLoadHooks.installBillingQueryHook(cl, PRO_PRODUCT);
         startPollingInstall(cl);
@@ -176,7 +163,10 @@ public final class CapyPlayerHooks {
             @Override
             public void run() {
                 installDeferredHooks(cl);
-                if (++attempts < 30) {
+                if (appContext != null && attempts % 3 == 0) {
+                    seedProSubscription(appContext);
+                }
+                if (++attempts < 60) {
                     new Handler(Looper.getMainLooper()).postDelayed(this, 1000);
                 }
             }
@@ -234,10 +224,9 @@ public final class CapyPlayerHooks {
         }
     }
 
-    /** Called by {@link PlatformMessagePatcher} and purchase hooks. */
-    @SuppressWarnings("unchecked")
+    /** Called by purchase hooks. */
     static Object patchPlatformValue(Object value) {
-        return patchReplyValue(value);
+        return CapyPlayerEntitlementSupport.patchPlatformValue(value);
     }
 
     static void onLibAppLoaded(ClassLoader cl) {
@@ -246,25 +235,7 @@ public final class CapyPlayerHooks {
     }
 
     static void seedProSubscription(Context context) {
-        try {
-            PreferencesPbSeeder.seedLifetimePro(context, SUBSCRIPTION_STATE_JSON, PRO_PRODUCT);
-            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            long now = System.currentTimeMillis();
-            editor.putString("flutter.subscription_state", SUBSCRIPTION_STATE_JSON);
-            editor.putString("flutter.desktop_subscription_state", SUBSCRIPTION_STATE_JSON);
-            editor.putString("flutter.subscription_sync_times", "{\"google\":" + now + "}");
-            editor.putString("flutter.synced_purchase_ids",
-                    "[\"" + PRO_PRODUCT + "\",\"" + LIFETIME_PRODUCT + "\"]");
-            editor.putString("flutter.last_subscription_sync_time", String.valueOf(now));
-            editor.putString("flutter.add_resource_quota", String.valueOf(Integer.MAX_VALUE));
-            editor.putString("flutter.isPro", "true");
-            editor.putString("flutter.subscriptionId", PRO_PRODUCT);
-            editor.putString("flutter.purchaseCredential", CapyPlayerLoadHooks.fakePurchaseBase64());
-            editor.commit();
-        } catch (Throwable t) {
-            log(TAG + ": seed failed: " + t.getMessage());
-        }
+        CapyPlayerEntitlementSupport.seedProSubscription(context);
     }
 
     private static void hookSharedPreferencesImpl() {
@@ -497,10 +468,12 @@ public final class CapyPlayerHooks {
             XposedHelpers.findAndHookMethod(body, "string", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    if (param.getResult() instanceof String
-                            && shouldReplaceSubscriptionApiBody((String) param.getResult())) {
-                        param.setResult(SUBSCRIPTION_STATUS_JSON);
-                        log(TAG + ": replaced OkHttp subscription body");
+                    if (param.getResult() instanceof String) {
+                        String patched = CapyPlayerSubscriptionPatcher.patchText((String) param.getResult());
+                        if (!patched.equals(param.getResult())) {
+                            param.setResult(patched);
+                            log(TAG + ": replaced OkHttp subscription body");
+                        }
                     }
                 }
             });
@@ -695,7 +668,8 @@ public final class CapyPlayerHooks {
 
     private static boolean isEntitlementKey(String key) {
         String n = normalizedKey(key);
-        return n.contains("entitlement") || n.equals("is_pro") || n.equals("ispro");
+        return n.contains("entitlement") || n.equals("is_pro") || n.equals("ispro")
+                || n.contains("hide_subscription");
     }
 
     private static boolean isQuotaKey(String key) {
@@ -722,14 +696,6 @@ public final class CapyPlayerHooks {
                 || lower.contains("\"status\":\"expired\"")
                 || lower.contains("\"tier\":\"free\"")
                 || lower.contains("\"plan\":\"free\"");
-    }
-
-    private static boolean shouldReplaceSubscriptionApiBody(String body) {
-        if (body == null || !body.trim().startsWith("{")) {
-            return false;
-        }
-        String lower = body.toLowerCase(Locale.ROOT);
-        return lower.contains("subscription") || lower.contains("hassubscription");
     }
 
     private static String normalizedKey(String key) {

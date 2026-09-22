@@ -15,6 +15,7 @@ build_err.txt
 # Release APK dumps at repo root (keep artifacts/restore-point/)
 /ZoeVIP-*.apk
 /ZoeVIP-*.idsig
+/output/
 
 # Keystore stays local (not in snapshot)
 zoevip.keystore

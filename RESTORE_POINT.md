@@ -5,7 +5,7 @@
 | Pinned at | 2026-09-02 15:44 |
 | Version | 3.9.93 |
 | Git tag | restore-point |
-| Previous commit | e311291 |
+| Commit | 8ab3e4a |
 | Note | UI优化+安装检测修复+11应用列表(含红果) |
 
 ## Restore to this point
@@ -19,3 +19,4 @@ Or tell Cursor: **鎭㈠鍒版仮澶嶇偣**
 Run: cd e:\23\apk\zoevip ; .\scripts\pin-restore-point.ps1 -Message "your note"
 
 Or tell Cursor: **閽夊叆鎭㈠鐐?*
+

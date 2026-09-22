@@ -28,8 +28,12 @@ final class PlatformMessagePatcher {
             ByteBuffer slice = message.duplicate();
             slice.order(ByteOrder.nativeOrder());
             slice.position(position);
+            // Skip huge buffers (library dumps / binary blobs) — decode would OOM.
+            if (slice.remaining() > 262144) {
+                return null;
+            }
             Object decoded = readValue(slice);
-            Object patched = CapyPlayerHooks.patchPlatformValue(decoded);
+            Object patched = CapyPlayerEntitlementSupport.patchPlatformValue(decoded);
             if (patched == decoded) {
                 return null;
             }

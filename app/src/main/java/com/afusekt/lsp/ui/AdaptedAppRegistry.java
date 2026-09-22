@@ -177,7 +177,7 @@ public final class AdaptedAppRegistry {
                 "CapyPlayer",
                 "com.feifeiduck.capyplayer",
                 R.drawable.ic_adapt_capyplayer,
-                "1.1.4",
+                "1.1.5",
                 "Lifetime Pro · 无限资源库 · 全部 Pro 体验",
                 RED,
                 ACTION_GUIDE,
@@ -276,7 +276,6 @@ public final class AdaptedAppRegistry {
         list.add(new Entry(
                 "红果免费短剧",
                 "com.phoenix.read",
-                new String[]{"com.kylin.read"},
                 R.drawable.ic_adapt_hongguo,
                 "理论适配所有版本",
                 "VIP 解锁 · 会员标 · 短剧付费锁 · 免广告",
@@ -285,11 +284,28 @@ public final class AdaptedAppRegistry {
                 "红果免费短剧",
                 new String[]{
                         "NPatch：在管理器启用 ZoeVIP 并勾选 com.phoenix.read",
-                        "LSPosed：勾选 com.phoenix.read 或 com.kylin.read",
-                        "强制停止后重开；成功注入会弹出提示"
+                        "LSPosed：勾选 com.phoenix.read 后强制停止重开",
+                        "成功注入会弹出「ZoeVIP 已注入红果短剧」提示"
                 },
                 "查看说明",
-                "变体包名 com.kylin.read"
+                null
+        ));
+        list.add(new Entry(
+                "红果免费漫剧",
+                "com.kylin.read",
+                R.drawable.ic_adapt_kylin,
+                "理论适配所有版本",
+                "VIP 解锁 · 会员标 · 漫剧付费锁 · 免广告",
+                PURPLE,
+                ACTION_GUIDE,
+                "红果免费漫剧",
+                new String[]{
+                        "NPatch：在管理器启用 ZoeVIP 并勾选 com.kylin.read",
+                        "LSPosed：勾选 com.kylin.read 后强制停止重开",
+                        "成功注入会弹出「ZoeVIP 已注入红果漫剧」提示"
+                },
+                "查看说明",
+                "包名 com.kylin.read"
         ));
         list.add(new Entry(
                 "Scene / VTools",
@@ -306,6 +322,23 @@ public final class AdaptedAppRegistry {
                 },
                 "查看说明",
                 null
+        ));
+        list.add(new Entry(
+                "Yamby",
+                "com.hush.yamby",
+                R.drawable.ic_adapt_yamby,
+                "2.0.5.5",
+                "Lifetime Pro · MMKV + Billing 伪造 · Pro 页解锁",
+                BLUE,
+                ACTION_GUIDE,
+                "Yamby",
+                new String[]{
+                        "LSPosed 启用 ZoeVIP 并勾选 com.hush.yamby",
+                        "NPatch 重打包包名同为 com.hush.yamby",
+                        "强制停止后重开；设置页应显示 Pro"
+                },
+                "查看说明",
+                "libxposed API 102+"
         ));
         list.add(new Entry(
                 "Hills",

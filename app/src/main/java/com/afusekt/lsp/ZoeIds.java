@@ -17,7 +17,7 @@ public final class ZoeIds {
     public static final String FANQIE_NOVEL_PACKAGE = "com.dragon.read";
     /** 红果免费短剧 */
     public static final String HONGGUO_PACKAGE = "com.phoenix.read";
-    /** 红果 / 同内核变体 */
+    /** 红果免费漫剧（同 dragon.read 内核） */
     public static final String KYLIN_PACKAGE = "com.kylin.read";
     /** Hills 播放器（Emby/Jellyfin） */
     public static final String HILLS_PACKAGE = "com.mountains.hills";
@@ -25,6 +25,8 @@ public final class ZoeIds {
     public static final String LVCHA_PACKAGE = "com.abjlvcha.main";
     /** 绿茶 VPN 原始包名 */
     public static final String LVCHA_ORIGINAL_PACKAGE = "com.lvcha.main";
+    /** Yamby 播放器 */
+    public static final String YAMBY_PACKAGE = "com.hush.yamby";
 
     private ZoeIds() {
     }

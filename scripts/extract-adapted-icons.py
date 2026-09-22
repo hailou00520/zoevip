@@ -26,6 +26,7 @@ MAPPING = {
     "com_omarea_vtools": "ic_adapt_vtools",
     "com_mountains_hills": "ic_adapt_hills",
     "com_abjlvcha_main": "ic_adapt_lvcha",
+    "com_hush_yamby": "ic_adapt_yamby",
 }
 
 FLUTTER_HINTS = (

@@ -74,6 +74,8 @@ final class CapyPlayerNativePatch {
         }
     }
 
+    private static native void nativeInstallNetworkHooks();
+
     private static native boolean nativeApplyLibAppPatches();
 
     private static native boolean nativeWaitAndApply(int timeoutMs);

@@ -7,12 +7,14 @@ import com.afusekt.lsp.MainHook;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Writes FlutterSharedPreferences DataStore protobuf directly.
@@ -24,18 +26,32 @@ final class PreferencesPbSeeder {
 
     private static final String LOG_PREFIX = MainHook.TAG + ":CapyPlayer:Pb";
     private static final String FILE_NAME = "FlutterSharedPreferences.preferences_pb";
+    private static final AtomicBoolean SEEDED = new AtomicBoolean(false);
 
     private PreferencesPbSeeder() {
     }
 
+    static void markNeedsReseed() {
+        SEEDED.set(false);
+    }
+
     static void seedLifetimePro(Context context, String subscriptionJson, String productId) {
         try {
+            File dir = new File(context.getFilesDir(), "datastore");
+            File target = new File(dir, FILE_NAME);
+            if (SEEDED.get() && !needsReseed(target)) {
+                return;
+            }
             Map<String, Object> values = new LinkedHashMap<>();
             long now = System.currentTimeMillis();
-            String purchaseCredential = CapyPlayerLoadHooks.fakePurchaseBase64();
+            // Match on-device free blob shape; do NOT seed fake purchaseCredential —
+            // Play verify rejects it and SubscriptionSyncService resets to free.
+            String localData = CapyPlayerSubscriptionPatcher.lifetimeLocalDataJson();
             putString(values, "flutter.subscription_state", subscriptionJson);
+            putString(values, "flutter.subscription_data", localData);
             putString(values, "flutter.desktop_subscription_state", subscriptionJson);
             putString(values, "subscription_state", subscriptionJson);
+            putString(values, "subscription_data", localData);
             putString(values, "desktop_subscription_state", subscriptionJson);
             putString(values, "flutter.subscription_sync_times", "{\"google\":" + now + "}");
             putString(values, "flutter.synced_purchase_ids",
@@ -46,10 +62,44 @@ final class PreferencesPbSeeder {
             putBool(values, "flutter.isPro", true);
             putBool(values, "isPro", true);
             putString(values, "flutter.subscriptionId", productId);
-            putString(values, "flutter.purchaseCredential", purchaseCredential);
+            putBool(values, "flutter.proFeatureEntitlementReady", true);
+            putBool(values, "flutter.subscriptionEntitlementReady", true);
+            putBool(values, "proFeatureEntitlementReady", true);
+            putBool(values, "subscriptionEntitlementReady", true);
+            putBool(values, "flutter.hideSubscriptionCard", true);
+            putBool(values, "hideSubscriptionCard", true);
+            // Empty credential clears leftover fake tokens (later duplicate key wins).
+            putString(values, "flutter.purchaseCredential", "");
+            putString(values, "purchaseCredential", "");
             writePb(context, values, LOG_PREFIX);
+            SEEDED.set(true);
         } catch (Throwable t) {
+            SEEDED.set(false);
             Log.i(MainHook.TAG, LOG_PREFIX + ": failed: " + t.getMessage());
+        }
+    }
+
+    static boolean needsReseedPublic(File target) {
+        return needsReseed(target);
+    }
+
+    private static boolean needsReseed(File target) {
+        if (target == null || !target.exists()) {
+            return true;
+        }
+        try (FileInputStream in = new FileInputStream(target)) {
+            byte[] buf = new byte[(int) Math.min(target.length(), 256 * 1024L)];
+            int n = in.read(buf);
+            if (n <= 0) {
+                return true;
+            }
+            String text = new String(buf, 0, n, StandardCharsets.ISO_8859_1).toLowerCase();
+            return text.contains("\"tier\":\"free\"")
+                    || text.contains("rejectedreceipt")
+                    || text.contains("zoevip.pro.token")
+                    || !text.contains("\"tier\":\"lifetime\"");
+        } catch (Throwable t) {
+            return true;
         }
     }
 
@@ -62,7 +112,19 @@ final class PreferencesPbSeeder {
         File target = new File(dir, FILE_NAME);
         File temp = new File(dir, FILE_NAME + ".tmp");
         byte[] encoded = encodeMap(values);
+        // DataStore map: later duplicate keys win. Overlay onto the real file
+        // instead of replacing it (a full replace wiped ~95KB of prefs).
+        long existing = target.exists() ? target.length() : 0L;
         try (FileOutputStream out = new FileOutputStream(temp)) {
+            if (existing > encoded.length) {
+                try (FileInputStream in = new FileInputStream(target)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        out.write(buf, 0, n);
+                    }
+                }
+            }
             out.write(encoded);
             out.flush();
         }
@@ -72,7 +134,9 @@ final class PreferencesPbSeeder {
         if (!temp.renameTo(target)) {
             Log.i(MainHook.TAG, logPrefix + ": rename failed");
         } else {
-            Log.i(MainHook.TAG, logPrefix + ": seeded pb (" + encoded.length + " bytes)");
+            Log.i(MainHook.TAG, logPrefix + ": seeded pb ("
+                    + temp.length() + " bytes, overlay " + encoded.length
+                    + ", kept " + existing + ")");
         }
     }
 

@@ -100,32 +100,9 @@ final class CapyPlayerLoadHooks {
     }
 
     static void installBillingQueryHook(ClassLoader cl, String lifetimeProduct) {
-        if (!BILLING_QUERY_HOOKED.compareAndSet(false, true)) {
+        // Disabled: fake purchase tokens are rejected by server verify and reset tier to free.
+        if (cl == null || lifetimeProduct == null) {
             return;
-        }
-        try {
-            Class<?> listener = XposedHelpers.findClass(
-                    "com.android.billingclient.api.PurchasesResponseListener", cl);
-            XposedBridge.hookAllMethods(listener, "onQueryPurchasesResponse",
-                    new de.robv.android.xposed.XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            if (param.args.length < 2) {
-                                return;
-                            }
-                            try {
-                                Object purchase = newLifetimePurchase(cl, lifetimeProduct);
-                                param.args[1] = Collections.singletonList(purchase);
-                                log("queryPurchasesAsync -> injected lifetime purchase");
-                            } catch (Throwable t) {
-                                log("queryPurchasesAsync inject failed: " + t.getMessage());
-                            }
-                        }
-                    });
-            log("PurchasesResponseListener hooked");
-        } catch (Throwable t) {
-            BILLING_QUERY_HOOKED.set(false);
-            log("PurchasesResponseListener hook skipped: " + t.getMessage());
         }
     }
 

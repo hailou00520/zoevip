@@ -1,102 +1,79 @@
-package com.afusekt.lsp.hook;
+package com.afusekt.lsp.libxposed;
 
 import android.os.Handler;
 import android.os.Looper;
 
-import com.afusekt.lsp.MainHook;
-
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
+import com.afusekt.lsp.ZoeIds;
+import com.afusekt.lsp.ZoeModule;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
-/**
- * ZoT-style Pigeon billing inject for CapyPlayer (1.1.3 v7.* and 1.1.5 cg3.*).
- */
-final class CapyPlayerPurchaseHooks {
+import io.github.libxposed.api.XposedInterface;
 
-    private static final String TAG = MainHook.TAG + ":CapyPlayer";
-    private static final String PRO_PRODUCT = "capyplayer.pro.year";
+/**
+ * ZoT-style Pigeon billing inject for CapyPlayer (libxposed path).
+ */
+final class LibCapyPlayerPurchaseHooks {
+
+    private static final String TAG = ZoeIds.TAG + ":CapyIap";
+    private static final String PRO_PRODUCT = "capyplayer.pro.lifetime";
     private static final String FAKE_ORDER_ID = "GPA.1337-7331-CAPY-0001";
     private static final String PACKAGE_NAME = "com.feifeiduck.capyplayer";
     private static final long[] RETRY_DELAYS_MS = {250L, 500L, 1000L, 2000L, 4000L, 8000L};
-
-    private static final AtomicBoolean HOOK_INSTALLED = new AtomicBoolean(false);
-    private static final AtomicBoolean CLASS_LOAD_PROBE = new AtomicBoolean(false);
-    private static final AtomicBoolean RETRY_STARTED = new AtomicBoolean(false);
     private static final Pattern SKU_PATTERN = Pattern.compile("[A-Za-z0-9._-]{3,}");
 
-    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static final AtomicBoolean HOOK_INSTALLED = new AtomicBoolean(false);
+    private static final AtomicBoolean RETRY_STARTED = new AtomicBoolean(false);
+    private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
+    private static final Set<Object> API_INSTANCES =
+            Collections.newSetFromMap(new WeakHashMap<>());
 
-    private CapyPlayerPurchaseHooks() {
+    private LibCapyPlayerPurchaseHooks() {
     }
 
-    static void install(ClassLoader cl) {
-        hookClassLoaderProbe(cl);
-        if (tryInstallPurchaseHook(cl)) {
+    static void install(ZoeModule module, ClassLoader cl) {
+        if (tryInstallPurchaseHook(module, cl)) {
             return;
         }
-        startRetryThread(cl);
+        startRetryThread(module, cl);
     }
 
-    private static void hookClassLoaderProbe(final ClassLoader cl) {
-        if (!CLASS_LOAD_PROBE.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            XposedHelpers.findAndHookMethod(ClassLoader.class, "loadClass", String.class, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            if (param.getThrowable() != null) {
-                                return;
-                            }
-                            String name = (String) param.args[0];
-                            if ("cg3".equals(name) || "v7.h".equals(name)) {
-                                tryInstallPurchaseHook(cl);
-                            }
-                        }
-                    });
-        } catch (Throwable t) {
-            CLASS_LOAD_PROBE.set(false);
-            log("ClassLoader probe skipped: " + t.getMessage());
-        }
-    }
-
-    private static void startRetryThread(final ClassLoader cl) {
+    private static void startRetryThread(ZoeModule module, ClassLoader cl) {
         if (!RETRY_STARTED.compareAndSet(false, true)) {
             return;
         }
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                for (long delay : RETRY_DELAYS_MS) {
-                    if (HOOK_INSTALLED.get()) {
-                        return;
-                    }
-                    try {
-                        Thread.sleep(delay);
-                    } catch (InterruptedException ignored) {
-                        return;
-                    }
-                    if (tryInstallPurchaseHook(cl)) {
-                        return;
-                    }
+        Thread t = new Thread(() -> {
+            for (long delay : RETRY_DELAYS_MS) {
+                if (HOOK_INSTALLED.get()) {
+                    return;
                 }
-                log("Pigeon purchase API not found after retries");
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (tryInstallPurchaseHook(module, cl)) {
+                    return;
+                }
             }
-        }, "ZoeVIP-CapyIapRetry").start();
+            module.log(5, TAG, "Pigeon purchase API not found after retries");
+        }, "ZoeVIP-CapyIapRetry");
+        t.setDaemon(true);
+        t.start();
     }
 
-    private static boolean tryInstallPurchaseHook(ClassLoader cl) {
+    private static boolean tryInstallPurchaseHook(ZoeModule module, ClassLoader cl) {
         if (HOOK_INSTALLED.get()) {
             return true;
         }
@@ -109,17 +86,175 @@ final class CapyPlayerPurchaseHooks {
             return false;
         }
         Method launchBillingFlow = findLaunchBillingFlowMethod(apiClass, cl, profile);
-        if (launchBillingFlow == null) {
-            log("Pigeon launchBillingFlow bridge not found on " + apiClass.getName());
-            return false;
+        XposedInterface.ExceptionMode mode = XposedInterface.ExceptionMode.PROTECTIVE;
+        if (launchBillingFlow != null) {
+            hookMethod(module, launchBillingFlow, mode, chain -> {
+                String productId = extractProductId(chain.getArg(0));
+                Object billingResult = buildOkBillingResult(cl, profile);
+                if (billingResult == null) {
+                    module.log(5, TAG, "unable to build billing result; using original flow");
+                    return chain.proceed();
+                }
+                schedulePurchaseDelivery(module, cl, chain.getThisObject(), profile, productId, 150L);
+                module.log(4, TAG, "Pigeon launchBillingFlow('" + productId + "') -> OK");
+                return billingResult;
+            });
+        } else {
+            module.log(5, TAG, "launchBillingFlow bridge not found on " + apiClass.getName()
+                    + "; continuing with queryPurchases hooks");
         }
-        launchBillingFlow.setAccessible(true);
-        XposedBridge.hookMethod(launchBillingFlow, new LaunchBillingFlowHook(cl, profile));
-        hookApiConstructor(cl, apiClass, profile);
+        int queryHooks = hookQueryPurchasesMethods(module, cl, apiClass, profile, mode);
+        /* Unlock does not depend on IAP inject (fake tokens → rejectedReceipt).
+         * Mark installed once cg3 is present so retries stop spamming. */
+        if (launchBillingFlow == null && queryHooks <= 0) {
+            if (HOOK_INSTALLED.compareAndSet(false, true)) {
+                module.log(5, TAG, profile.label
+                        + " Pigeon present but billing bridges missing; skip IAP inject");
+            }
+            return true;
+        }
+        hookConstructors(module, apiClass, mode, chain -> {
+            Object result = chain.proceed();
+            Object instance = chain.getThisObject();
+            if (instance != null) {
+                API_INSTANCES.add(instance);
+            }
+            return result;
+        });
         if (HOOK_INSTALLED.compareAndSet(false, true)) {
-            log("CapyPlayer " + profile.label + " Pigeon purchase hook installed");
+            module.log(4, TAG, profile.label + " Pigeon purchase hook installed (query="
+                    + queryHooks + ")");
         }
         return true;
+    }
+
+    /** Return fake lifetime purchase from InAppPurchaseApi.queryPurchasesAsync. */
+    private static int hookQueryPurchasesMethods(
+            ZoeModule module,
+            ClassLoader cl,
+            Class<?> apiClass,
+            PigeonProfile profile,
+            XposedInterface.ExceptionMode mode
+    ) {
+        Class<?> responseClass = loadClass(cl, profile.responseClass);
+        if (responseClass == null) {
+            return 0;
+        }
+        int hooked = 0;
+        for (Method method : apiClass.getDeclaredMethods()) {
+            Class<?> returnType = method.getReturnType();
+            Class<?>[] params = method.getParameterTypes();
+            boolean returnsResponse = responseClass.equals(returnType);
+            boolean resultCallback = false;
+            if (!returnsResponse && params.length >= 1 && returnType == void.class) {
+                Class<?> last = params[params.length - 1];
+                if (last.isInterface()) {
+                    // Pigeon Result<PlatformPurchasesResponse> callback
+                    for (Method m : last.getMethods()) {
+                        if ("success".equals(m.getName()) && m.getParameterCount() == 1
+                                && responseClass.isAssignableFrom(m.getParameterTypes()[0])) {
+                            resultCallback = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!returnsResponse && !resultCallback) {
+                continue;
+            }
+            if (params.length > 2) {
+                continue;
+            }
+            final boolean useCallback = resultCallback;
+            hookMethod(module, method, mode, chain -> {
+                try {
+                    Object response = buildPurchasesResponse(cl, profile, PRO_PRODUCT);
+                    if (response != null) {
+                        if (useCallback) {
+                            Object[] args = chain.getArgs().toArray();
+                            Object result = args[args.length - 1];
+                            Method success = findSuccessMethod(result.getClass(), responseClass);
+                            if (success != null) {
+                                success.invoke(result, response);
+                                module.log(4, TAG, "Pigeon " + method.getName()
+                                        + " callback -> injected lifetime purchase");
+                                return null;
+                            }
+                        } else {
+                            module.log(4, TAG, "Pigeon " + method.getName()
+                                    + " -> injected lifetime purchase");
+                            return response;
+                        }
+                    }
+                } catch (Throwable t) {
+                    module.log(5, TAG, "queryPurchases inject failed: " + t.getMessage());
+                }
+                return chain.proceed();
+            });
+            hooked++;
+        }
+        return hooked;
+    }
+
+    private static Method findSuccessMethod(Class<?> resultClass, Class<?> responseClass) {
+        for (Method m : resultClass.getMethods()) {
+            if (!"success".equals(m.getName()) || m.getParameterCount() != 1) {
+                continue;
+            }
+            if (m.getParameterTypes()[0].isAssignableFrom(responseClass)
+                    || responseClass.isAssignableFrom(m.getParameterTypes()[0])) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    private static Object buildPurchasesResponse(
+            ClassLoader cl, PigeonProfile profile, String productId
+    ) throws Exception {
+        Class<?> purchaseClass = loadClass(cl, profile.purchaseClass);
+        Class<?> responseClass = loadClass(cl, profile.responseClass);
+        Class<?> stateClass = loadClass(cl, profile.stateClass);
+        Class<?> accountClass = loadClass(cl, profile.accountClass);
+        if (purchaseClass == null || responseClass == null
+                || stateClass == null || accountClass == null) {
+            return null;
+        }
+        Object purchasedState = findEnumConstant(stateClass, "PURCHASED");
+        if (purchasedState == null) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        String token = "zoevip-capy-" + productId + "-" + now;
+        String json = "{\"productId\":\"" + productId + "\",\"purchaseToken\":\"" + token
+                + "\",\"purchaseState\":0,\"acknowledged\":true}";
+        Object accountIds = newInstanceMatching(accountClass, null, null);
+        Object purchase = newInstanceMatching(purchaseClass,
+                FAKE_ORDER_ID,
+                PACKAGE_NAME,
+                now,
+                token,
+                "zoevip",
+                Collections.singletonList(productId),
+                Boolean.FALSE,
+                json,
+                "zoevip",
+                Boolean.TRUE,
+                1L,
+                purchasedState,
+                accountIds,
+                null);
+        if (purchase == null) {
+            return null;
+        }
+        Object billingResult = buildOkBillingResult(cl, profile);
+        return newInstanceMatching(responseClass, billingResult,
+                Collections.singletonList(purchase));
+    }
+
+    /** After login: reseed only; do not re-inject fake tokens. */
+    static void redeliverAfterLogin(ZoeModule module, ClassLoader cl) {
+        module.log(4, TAG, "post-login: skip purchase stream (avoid rejectedReceipt)");
     }
 
     private static PigeonProfile detectProfile(ClassLoader cl) {
@@ -132,57 +267,49 @@ final class CapyPlayerPurchaseHooks {
         return null;
     }
 
-    private static Method findLaunchBillingFlowMethod(Class<?> apiClass, ClassLoader cl,
-            PigeonProfile profile) {
+    private static Method findLaunchBillingFlowMethod(
+            Class<?> apiClass, ClassLoader cl, PigeonProfile profile
+    ) {
         Class<?> billingResultClass = loadClass(cl, profile.billingResultClass);
         if (billingResultClass == null) {
             return null;
         }
+        Method fallback = null;
         for (Method method : apiClass.getDeclaredMethods()) {
-            if (method.getParameterCount() == 1
-                    && billingResultClass.equals(method.getReturnType())
-                    && "c".equals(method.getName())) {
+            if (method.getParameterCount() != 1
+                    || !billingResultClass.equals(method.getReturnType())) {
+                continue;
+            }
+            if ("c".equals(method.getName())) {
                 return method;
             }
-        }
-        return null;
-    }
-
-    private static void hookApiConstructor(final ClassLoader cl, Class<?> apiClass,
-            final PigeonProfile profile) {
-        try {
-            XposedBridge.hookAllConstructors(apiClass, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    schedulePurchaseDelivery(cl, param.thisObject, profile, PRO_PRODUCT, 800L);
-                }
-            });
-        } catch (Throwable t) {
-            log("purchase API constructor hook skipped: " + t.getMessage());
-        }
-    }
-
-    private static final class LaunchBillingFlowHook extends XC_MethodHook {
-        private final ClassLoader classLoader;
-        private final PigeonProfile profile;
-
-        LaunchBillingFlowHook(ClassLoader classLoader, PigeonProfile profile) {
-            this.classLoader = classLoader;
-            this.profile = profile;
-        }
-
-        @Override
-        protected void beforeHookedMethod(MethodHookParam param) {
-            String productId = extractProductId(param.args[0]);
-            Object billingResult = buildOkBillingResult(classLoader, profile);
-            if (billingResult == null) {
-                log("unable to build billing result; using original flow");
-                return;
+            // Obfuscation may rename the bridge; keep first 1-arg billingResult method.
+            if (fallback == null) {
+                fallback = method;
             }
-            schedulePurchaseDelivery(classLoader, param.thisObject, profile, productId, 150L);
-            param.setResult(billingResult);
-            log("Pigeon launchBillingFlow('" + productId + "') -> OK");
         }
+        return fallback;
+    }
+
+    private static void schedulePurchaseDelivery(
+            ZoeModule module,
+            ClassLoader cl,
+            Object apiInstance,
+            PigeonProfile profile,
+            String productId,
+            long delayMs
+    ) {
+        if (apiInstance == null) {
+            return;
+        }
+        MAIN_HANDLER.postDelayed(() -> {
+            try {
+                deliverPurchaseUpdate(module, cl, apiInstance, profile, productId);
+                module.log(4, TAG, "delivered purchase stream update for '" + productId + "'");
+            } catch (Throwable t) {
+                module.log(5, TAG, "purchase stream delivery failed: " + t.getMessage());
+            }
+        }, delayMs);
     }
 
     private static String extractProductId(Object request) {
@@ -193,11 +320,10 @@ final class CapyPlayerPurchaseHooks {
             for (Field field : request.getClass().getDeclaredFields()) {
                 field.setAccessible(true);
                 Object value = field.get(request);
-                if (!(value instanceof String)) {
+                if (!(value instanceof String str) || str.isEmpty()) {
                     continue;
                 }
-                String str = (String) value;
-                if (!str.isEmpty() && SKU_PATTERN.matcher(str).matches()) {
+                if (SKU_PATTERN.matcher(str).matches()) {
                     return str;
                 }
             }
@@ -206,26 +332,13 @@ final class CapyPlayerPurchaseHooks {
         return PRO_PRODUCT;
     }
 
-    private static void schedulePurchaseDelivery(final ClassLoader cl, final Object apiInstance,
-            final PigeonProfile profile, final String productId, long delayMs) {
-        if (apiInstance == null) {
-            return;
-        }
-        mainHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    deliverPurchaseUpdate(cl, apiInstance, profile, productId);
-                    log("delivered purchase stream update for '" + productId + "'");
-                } catch (Throwable t) {
-                    log("purchase stream delivery failed: " + t.getMessage());
-                }
-            }
-        }, delayMs);
-    }
-
-    private static void deliverPurchaseUpdate(ClassLoader cl, Object apiInstance,
-            PigeonProfile profile, String productId) throws Exception {
+    private static void deliverPurchaseUpdate(
+            ZoeModule module,
+            ClassLoader cl,
+            Object apiInstance,
+            PigeonProfile profile,
+            String productId
+    ) throws Exception {
         Object messenger = resolveMessenger(cl, apiInstance, profile);
         if (messenger == null) {
             throw new IllegalStateException("BinaryMessenger missing");
@@ -235,7 +348,8 @@ final class CapyPlayerPurchaseHooks {
         Class<?> responseClass = loadClass(cl, profile.responseClass);
         Class<?> stateClass = loadClass(cl, profile.stateClass);
         Class<?> accountClass = loadClass(cl, profile.accountClass);
-        if (purchaseClass == null || responseClass == null || stateClass == null || accountClass == null) {
+        if (purchaseClass == null || responseClass == null
+                || stateClass == null || accountClass == null) {
             throw new IllegalStateException("purchase pigeon types missing");
         }
 
@@ -326,7 +440,8 @@ final class CapyPlayerPurchaseHooks {
             if (callbackApi != null) {
                 Object messenger = getFieldByName(callbackApi, "a");
                 if (messenger == null) {
-                    messenger = findFieldByTypeName(callbackApi, "io.flutter.plugin.common.BinaryMessenger");
+                    messenger = findFieldByTypeName(callbackApi,
+                            "io.flutter.plugin.common.BinaryMessenger");
                 }
                 if (messenger != null) {
                     return messenger;
@@ -351,7 +466,8 @@ final class CapyPlayerPurchaseHooks {
 
     private static Constructor<?> findChannelConstructor(Class<?> channelClass, Class<?> messengerClass) {
         for (Constructor<?> ctor : channelClass.getDeclaredConstructors()) {
-            if (ctor.getParameterCount() == 5 && ctor.getParameterTypes()[0].isAssignableFrom(messengerClass)) {
+            if (ctor.getParameterCount() == 5
+                    && ctor.getParameterTypes()[0].isAssignableFrom(messengerClass)) {
                 return ctor;
             }
         }
@@ -378,7 +494,7 @@ final class CapyPlayerPurchaseHooks {
             return null;
         }
         for (Object constant : constants) {
-            if (constant instanceof Enum && name.equals(((Enum<?>) constant).name())) {
+            if (constant instanceof Enum<?> e && name.equals(e.name())) {
                 return constant;
             }
         }
@@ -489,8 +605,34 @@ final class CapyPlayerPurchaseHooks {
         return null;
     }
 
-    private static void log(String message) {
-        XposedBridge.log(TAG + ": " + message);
+    private static void hookMethod(
+            ZoeModule module,
+            Method method,
+            XposedInterface.ExceptionMode mode,
+            XposedInterface.Hooker hooker
+    ) {
+        try {
+            method.setAccessible(true);
+            module.hook(method).setExceptionMode(mode).intercept(hooker);
+        } catch (Throwable t) {
+            module.log(5, TAG, "hook failed " + method + ": " + t.getMessage());
+        }
+    }
+
+    private static void hookConstructors(
+            ZoeModule module,
+            Class<?> cls,
+            XposedInterface.ExceptionMode mode,
+            XposedInterface.Hooker hooker
+    ) {
+        for (Constructor<?> ctor : cls.getDeclaredConstructors()) {
+            try {
+                ctor.setAccessible(true);
+                module.hook(ctor).setExceptionMode(mode).intercept(hooker);
+            } catch (Throwable t) {
+                module.log(5, TAG, "ctor hook failed: " + t.getMessage());
+            }
+        }
     }
 
     private static final class PigeonProfile {
